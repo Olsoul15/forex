@@ -143,4 +143,4 @@ def test_get_support_resistance(orchestrator):
     assert "support_levels" in sr_levels
     assert "resistance_levels" in sr_levels
     assert isinstance(sr_levels["support_levels"], list)
-    assert isinstance(sr_levels["resistance_levels"], list) 
+    assert isinstance(sr_levels["resistance_levels"], list)
