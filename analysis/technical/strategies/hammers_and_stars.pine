@@ -1,0 +1,93 @@
+// @version=5
+// @author=ForexAI
+// @description=Hammers and Shooting Stars Strategy
+
+strategy("Hammers and Shooting Stars Strategy", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=10)
+
+// Strategy Parameters
+length = input.int(14, title="RSI Length", minval=1)
+overbought = input.int(70, title="RSI Overbought Level", minval=50, maxval=100)
+oversold = input.int(30, title="RSI Oversold Level", minval=0, maxval=50)
+atr_mult = input.float(2.0, title="ATR Multiplier for SL/TP", minval=0.5, maxval=5.0, step=0.1)
+atr_period = input.int(14, title="ATR Period", minval=1)
+body_size_min = input.float(0.1, title="Minimum Body Size (% of Range)", minval=0.0, maxval=1.0, step=0.01)
+body_size_max = input.float(0.3, title="Maximum Body Size (% of Range)", minval=0.0, maxval=1.0, step=0.01)
+lower_wick_min = input.float(0.5, title="Minimum Lower Wick Size (% of Range)", minval=0.0, maxval=1.0, step=0.01)
+upper_wick_min = input.float(0.5, title="Minimum Upper Wick Size (% of Range)", minval=0.0, maxval=1.0, step=0.01)
+
+// Technical Indicators
+rsi = ta.rsi(close, length)
+atr = ta.atr(atr_period)
+
+// Plotting indicators
+plot(rsi, title="RSI", color=color.purple)
+hline(overbought, title="Overbought Level", color=color.red)
+hline(oversold, title="Oversold Level", color=color.green)
+
+// Pattern Detection Functions
+is_hammer(idx) =>
+    range = high[idx] - low[idx]
+    body_size = math.abs(close[idx] - open[idx])
+    body_pct = body_size / range
+    
+    lower_wick = math.min(open[idx], close[idx]) - low[idx]
+    lower_wick_pct = lower_wick / range
+    
+    upper_wick = high[idx] - math.max(open[idx], close[idx])
+    upper_wick_pct = upper_wick / range
+    
+    bullish = close[idx] > open[idx]
+    
+    body_pct >= body_size_min and body_pct <= body_size_max and 
+    lower_wick_pct >= lower_wick_min and 
+    upper_wick_pct <= body_pct and
+    bullish
+
+is_shooting_star(idx) =>
+    range = high[idx] - low[idx]
+    body_size = math.abs(close[idx] - open[idx])
+    body_pct = body_size / range
+    
+    lower_wick = math.min(open[idx], close[idx]) - low[idx]
+    lower_wick_pct = lower_wick / range
+    
+    upper_wick = high[idx] - math.max(open[idx], close[idx])
+    upper_wick_pct = upper_wick / range
+    
+    bearish = close[idx] < open[idx]
+    
+    body_pct >= body_size_min and body_pct <= body_size_max and 
+    upper_wick_pct >= upper_wick_min and 
+    lower_wick_pct <= body_pct and
+    bearish
+
+// Pattern Detection
+hammer = is_hammer(0)
+shooting_star = is_shooting_star(0)
+
+// Plotting patterns
+plotshape(hammer, title="Hammer", location=location.belowbar, color=color.green, style=shape.triangleup, size=size.small)
+plotshape(shooting_star, title="Shooting Star", location=location.abovebar, color=color.red, style=shape.triangledown, size=size.small)
+
+// Trading Logic
+buy_signal = hammer and rsi < oversold
+sell_signal = shooting_star and rsi > overbought
+
+// Define stop loss and take profit levels
+long_sl = low - atr * atr_mult
+long_tp = close + (atr * atr_mult * 2)
+short_sl = high + atr * atr_mult
+short_tp = close - (atr * atr_mult * 2)
+
+// Entry and exit conditions
+if (buy_signal)
+    strategy.entry("Hammer", strategy.long)
+    strategy.exit("Exit Long", "Hammer", stop=long_sl, limit=long_tp)
+
+if (sell_signal)
+    strategy.entry("Star", strategy.short)
+    strategy.exit("Exit Short", "Star", stop=short_sl, limit=short_tp)
+
+// Strategy alerts
+alertcondition(buy_signal, title="Hammer Pattern Buy Signal", message="Hammer Pattern detected with oversold RSI - BUY Signal")
+alertcondition(sell_signal, title="Shooting Star Pattern Sell Signal", message="Shooting Star Pattern detected with overbought RSI - SELL Signal") 
