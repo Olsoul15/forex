@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forex_ai"
+version = "0.1.0"
+authors = [
+  { name="Forex AI Team", email="info@forexai.example.com" },
+]
+description = "AI-Powered Forex Trading System"
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "flask",
+    "flask-cors",
+    "httpx",
+    "requests",
+    "sse-starlette",
+    "google-cloud-aiplatform",
+    "google-auth",
+    "openai-whisper",
+    "datasets",
+    "evaluate",
+    "faiss-cpu",
+    "scikit-learn",
+    "tensorflow",
+    "backtrader",
+    "joblib",
+    "numpy",
+    "oandapyV20",
+    "pandas",
+    "pandas-ta",
+    "scipy",
+    "redis",
+    "supabase",
+    "click",
+    "python-dotenv",
+    "psutil",
+    "pydantic",
+    "pydantic-settings",
+    "pytubefix",
+    "tenacity",
+    "PyYAML",
+    "matplotlib",
+    "plotly",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "pytest-mock",
+]
+
+[project.urls]
+Homepage = "https://github.com/shawn-warnock/forex_ai"
+
+[project.scripts]
+forex-ai = "forex_ai.cli:main"
+
+[tool.setuptools]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["forex_ai*"]
+exclude = ["tests*"] 

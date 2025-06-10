@@ -1,8 +1,9 @@
 # conftest.py for integration tests
 
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, AsyncMock
 import pandas as pd
+import asyncio
 
 # TODO: Add shared fixtures here, for example:
 # - A fixture for a default AnalysisConfig object.
@@ -30,12 +31,15 @@ def mock_data_fetcher():
         "mid": {"o": "1.1000", "h": "1.1050", "l": "1.0990", "c": "1.1030"}
     }
     
-    # Mock the get_candles method
-    fetcher.get_candles.return_value = {
-        "instrument": "EUR_USD",
-        "granularity": "H1",
-        "candles": [mock_candle for _ in range(100)] # Return 100 candles
-    }
+    # Mock the get_candles method to be async
+    async def mock_get_candles(*args, **kwargs):
+        return {
+            "instrument": kwargs.get("instrument", "EUR_USD"),
+            "granularity": kwargs.get("timeframe", "H1"),
+            "candles": [mock_candle for _ in range(100)] # Return 100 candles
+        }
+
+    fetcher.get_candles = AsyncMock(side_effect=mock_get_candles)
     return fetcher
 
 @pytest.fixture

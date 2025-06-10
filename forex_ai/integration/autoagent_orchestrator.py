@@ -11,7 +11,10 @@ the flow of information between different components.
 
 import logging
 import datetime
+import asyncio
 from typing import Dict, List, Any, Optional, Union
+
+from forex_ai.integration.enhanced_memory_manager import EnhancedMemoryManager
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +27,7 @@ class AutoAgentOrchestrator:
     analysis sessions, and generates trading signals based on comprehensive analysis.
     """
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: Dict[str, Any], memory_manager: Optional[EnhancedMemoryManager] = None):
         """
         Initialize the AutoAgent orchestrator.
 
@@ -32,15 +35,16 @@ class AutoAgentOrchestrator:
             config: Configuration dictionary with the following keys:
                 - config: AnalysisConfig object with analysis parameters
                 - data_fetcher: MarketDataFetcher instance for retrieving market data
+            memory_manager: Optional instance of EnhancedMemoryManager.
         """
         self.config = config.get("config", {})
         self.data_fetcher = config.get("data_fetcher")
         self.confidence_threshold = config.get("confidence_threshold", 0.65)
-        self.context_memory = {}
+        self.memory_manager = memory_manager or EnhancedMemoryManager()
 
         logger.info("AutoAgentOrchestrator initialized with config: %s", config)
 
-    def analyze_market(
+    async def analyze_market(
         self, instrument: str, timeframe: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -61,7 +65,9 @@ class AutoAgentOrchestrator:
         logger.info(f"Analyzing market for {instrument} on timeframe {timeframe}")
 
         timeframes = (
-            [timeframe] if timeframe else self.config.get("timeframes", ["H1", "H4"])
+            [timeframe]
+            if timeframe
+            else getattr(self.config, "timeframes", ["H1", "H4"])
         )
         results = {
             "instrument": instrument,
@@ -72,14 +78,18 @@ class AutoAgentOrchestrator:
             "support_resistance": {},
         }
 
-        # Process each timeframe
-        for tf in timeframes:
-            tf_results = self._analyze_timeframe(instrument, tf)
-            results["insights"].extend(tf_results.get("insights", []))
+        # Process each timeframe concurrently
+        timeframe_analyses = await asyncio.gather(
+            *[self._analyze_timeframe(instrument, tf) for tf in timeframes]
+        )
 
+        for tf_results in timeframe_analyses:
+            results["insights"].extend(tf_results.get("insights", []))
             # Add support and resistance levels
             if tf_results.get("support_resistance"):
-                results["support_resistance"][tf] = tf_results["support_resistance"]
+                tf = tf_results.get("timeframe")
+                if tf:
+                    results["support_resistance"][tf] = tf_results["support_resistance"]
 
         # Generate overall market view by aggregating timeframe analyses
         results["market_view"] = self._generate_market_view(results["insights"])
@@ -90,11 +100,11 @@ class AutoAgentOrchestrator:
             results["signals"] = signals
 
         # Store context for future reference
-        self._update_context(instrument, results)
+        await self._update_context(instrument, results)
 
         return results
 
-    def _analyze_timeframe(self, instrument: str, timeframe: str) -> Dict[str, Any]:
+    async def _analyze_timeframe(self, instrument: str, timeframe: str) -> Dict[str, Any]:
         """
         Analyze a specific timeframe for the given instrument.
 
@@ -108,8 +118,9 @@ class AutoAgentOrchestrator:
         logger.debug(f"Analyzing {instrument} on {timeframe} timeframe")
 
         # Fetch market data for the timeframe
+        market_data = None
         if self.data_fetcher:
-            market_data = self.data_fetcher.get_candles(
+            market_data = await self.data_fetcher.get_candles(
                 instrument=instrument,
                 timeframe=timeframe,
                 count=100,  # Use configuration or reasonable default
@@ -208,35 +219,36 @@ class AutoAgentOrchestrator:
 
     def _calculate_rsi(self, prices: List[float], period: int = 14) -> float:
         """
-        Calculate the Relative Strength Index.
+        Calculate the Relative Strength Index using a smoothed moving average.
 
         Args:
             prices: List of closing prices
             period: RSI period (default: 14)
 
         Returns:
-            RSI value
+            RSI value, or 50 if not enough data.
         """
         if len(prices) < period + 1:
-            return 50  # Not enough data, return neutral
+            return 50.0
 
-        # Calculate price changes
-        deltas = [prices[i] - prices[i - 1] for i in range(1, len(prices))]
-
-        # Separate gains and losses
+        deltas = [prices[i] - prices[i-1] for i in range(1, len(prices))]
         gains = [delta if delta > 0 else 0 for delta in deltas]
         losses = [-delta if delta < 0 else 0 for delta in deltas]
 
-        # Calculate average gains and losses
-        avg_gain = sum(gains[-period:]) / period
-        avg_loss = sum(losses[-period:]) / period
+        # Calculate initial average gain and loss
+        avg_gain = sum(gains[:period]) / period
+        avg_loss = sum(losses[:period]) / period
+
+        # Smooth subsequent gains and losses
+        for i in range(period, len(gains)):
+            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
 
         if avg_loss == 0:
-            return 100  # No losses, RSI = 100
+            return 100.0
 
         rs = avg_gain / avg_loss
-        rsi = 100 - (100 / (1 + rs))
-
+        rsi = 100.0 - (100.0 / (1.0 + rs))
         return rsi
 
     def _calculate_macd(
@@ -252,50 +264,71 @@ class AutoAgentOrchestrator:
             signal: Signal line period
 
         Returns:
-            Tuple of (MACD line, signal line, histogram)
+            Tuple of the latest (MACD line, signal line, histogram) values.
         """
-        if len(prices) < slow + signal:
-            return None, None, None  # Not enough data
+        if len(prices) < slow:
+            return 0, 0, 0
 
-        # Calculate fast EMA
-        ema_fast = self._calculate_ema(prices, fast)
+        ema_fast = self._calculate_ema(prices, period=fast)
+        ema_slow = self._calculate_ema(prices, period=slow)
 
-        # Calculate slow EMA
-        ema_slow = self._calculate_ema(prices, slow)
+        if not ema_fast or not ema_slow:
+            return 0, 0, 0
 
-        # Calculate MACD line
-        macd_line = ema_fast - ema_slow
+        # Align the fast EMA with the slow EMA
+        ema_fast_aligned = ema_fast[slow - fast:]
 
-        # Calculate signal line (EMA of MACD line)
-        macd_series = [ema_fast[i] - ema_slow[i] for i in range(len(prices))]
-        signal_line = self._calculate_ema(macd_series, signal)
+        macd_line = [f - s for f, s in zip(ema_fast_aligned, ema_slow)]
 
-        # Calculate histogram
-        histogram = macd_line - signal_line
+        if len(macd_line) < signal:
+            return 0, 0, 0
 
-        return macd_line, signal_line, histogram
+        signal_line = self._calculate_ema(macd_line, signal)
 
-    def _calculate_ema(self, prices: List[float], period: int) -> float:
+        # Align MACD and signal lines
+        hist_start_offset = len(macd_line) - len(signal_line)
+        histogram = [m - s for m, s in zip(macd_line[hist_start_offset:], signal_line)]
+
+        latest_macd = macd_line[-1] if macd_line else None
+        latest_signal = signal_line[-1] if signal_line else None
+        latest_hist = histogram[-1] if histogram else None
+
+        logger.debug(f"MACD calculation: len(prices)={len(prices)}")
+        logger.debug(f"MACD calculation: len(ema_fast)={len(ema_fast)}, len(ema_slow)={len(ema_slow)}")
+        logger.debug(f"MACD calculation: len(macd_line)={len(macd_line)}")
+        logger.debug(f"MACD calculation: len(signal_line)={len(signal_line)}")
+        logger.debug(f"MACD calculation: len(histogram)={len(histogram)}")
+        logger.debug(f"MACD calculation: latest_macd={latest_macd}, latest_signal={latest_signal}, latest_hist={latest_hist}")
+
+        return latest_macd, latest_signal, latest_hist
+
+    def _calculate_ema(self, prices: List[float], period: int) -> List[float]:
         """
-        Calculate Exponential Moving Average.
+        Calculate the Exponential Moving Average (EMA).
 
         Args:
-            prices: List of prices
+            prices: List of closing prices
             period: EMA period
 
         Returns:
-            EMA value
+            A list of EMA values starting from the first possible period.
         """
         if len(prices) < period:
-            return prices[-1] if prices else 0  # Not enough data
-
+            return []
+        
+        ema_values = []
         multiplier = 2 / (period + 1)
-        ema = sum(prices[-period:]) / period  # Start with SMA
-
-        for price in prices[-period:]:
-            ema = (price - ema) * multiplier + ema
-
-        return ema
+        
+        # Calculate the initial SMA
+        sma = sum(prices[:period]) / period
+        ema_values.append(sma)
+        
+        # Calculate subsequent EMA values
+        for price in prices[period:]:
+            ema = (price - ema_values[-1]) * multiplier + ema_values[-1]
+            ema_values.append(ema)
+            
+        return ema_values
 
     def _calculate_bollinger_bands(
         self, prices: List[float], period: int = 20, deviation: int = 2
@@ -444,29 +477,25 @@ class AutoAgentOrchestrator:
         macd_data = indicators.get("macd", {})
         macd_hist = macd_data.get("histogram")
         if macd_hist is not None:
-            if macd_hist > 0 and macd_hist > indicators.get("macd", {}).get(
-                "histogram", -1
-            ):
+            if macd_hist > 0:
                 insights.append(
                     {
                         "timeframe": timeframe,
                         "instrument": instrument,
                         "indicator": "MACD",
                         "value": macd_hist,
-                        "message": f"MACD histogram is positive and increasing at {macd_hist:.6f}",
+                        "message": f"MACD histogram is positive at {macd_hist:.6f}",
                         "sentiment": "bullish",
                     }
                 )
-            elif macd_hist < 0 and macd_hist < indicators.get("macd", {}).get(
-                "histogram", 1
-            ):
+            elif macd_hist < 0:
                 insights.append(
                     {
                         "timeframe": timeframe,
                         "instrument": instrument,
                         "indicator": "MACD",
                         "value": macd_hist,
-                        "message": f"MACD histogram is negative and decreasing at {macd_hist:.6f}",
+                        "message": f"MACD histogram is negative at {macd_hist:.6f}",
                         "sentiment": "bearish",
                     }
                 )
@@ -805,29 +834,21 @@ class AutoAgentOrchestrator:
 
         return signals
 
-    def _update_context(self, instrument: str, results: Dict[str, Any]) -> None:
+    async def _update_context(self, instrument: str, results: Dict[str, Any]) -> None:
         """
         Update the context memory with the latest analysis results.
 
         Args:
-            instrument: Trading pair
-            results: Analysis results
+            instrument: Trading pair analyzed
+            results: Dictionary with analysis results
         """
-        if instrument not in self.context_memory:
-            self.context_memory[instrument] = []
-
-        # Keep only the last 10 analyses
-        if len(self.context_memory[instrument]) >= 10:
-            self.context_memory[instrument].pop(0)
-
-        # Store a simplified version of results to avoid memory bloat
-        simplified = {
-            "timestamp": results.get("timestamp"),
-            "market_view": results.get("market_view", {}),
-            "signals": results.get("signals", []),
-        }
-
-        self.context_memory[instrument].append(simplified)
+        try:
+            context_id = await self.memory_manager.store_analysis_result(
+                results, "comprehensive"
+            )
+            logger.debug(f"Stored analysis for {instrument} with context ID: {context_id}")
+        except Exception as e:
+            logger.error(f"Failed to store analysis context for {instrument}: {e}")
 
     def _generate_mock_data(self, instrument: str, timeframe: str) -> Dict[str, Any]:
         """
@@ -923,7 +944,7 @@ class AutoAgentOrchestrator:
         for tf in timeframes:
             # Fetch market data for the timeframe
             if self.data_fetcher:
-                market_data = self.data_fetcher.get_candles(
+                market_data = await self.data_fetcher.get_candles(
                     instrument=instrument,
                     timeframe=tf,
                     count=100,  # Get enough data for pattern detection
@@ -1013,3 +1034,26 @@ class AutoAgentOrchestrator:
         results["pattern_count"] = len(results["patterns"])
 
         return results
+
+    async def get_historical_analysis(
+        self, instrument: str, from_time: datetime, to_time: datetime
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieves historical analysis data for a given instrument and time range.
+
+        Args:
+            instrument: The trading instrument (e.g., 'EUR_USD').
+            from_time: The start of the time range.
+            to_time: The end of the time range.
+
+        Returns:
+            A list of historical analysis records.
+        """
+        if not self.memory_manager:
+            logger.warning("Memory manager is not available.")
+            return []
+        
+        context_id = f"analysis:{instrument}"
+        return await self.memory_manager.get_historical_analyses(
+            context_id, from_time, to_time
+        )

@@ -318,4 +318,31 @@ ENABLE_DOCS=true
 
 # Logging Configuration
 SENTRY_DSN=
-ENABLE_PERFORMANCE_LOGGING=true 
+ENABLE_PERFORMANCE_LOGGING=true
+
+### Environment Variables
+
+To run the application, you need to set up the following environment variables. You can create a `.env` file in the root directory and add the following:
+
+```
+# Application Settings
+APP_ENV=development
+SECRET_KEY=your_super_secret_key
+
+# Database (Supabase / PostgreSQL)
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_api_key
+
+# Redis
+REDIS_URL=redis://localhost:6379/0
+
+# Google Cloud Platform (for Vertex AI)
+# Ensure you have authenticated via gcloud CLI:
+# gcloud auth application-default login
+GCP_PROJECT_ID=your_gcp_project_id
+GCP_LOCATION=your_gcp_region # e.g., us-central1
+
+# OANDA API
+OANDA_API_KEY=your_oanda_api_key
+OANDA_ACCOUNT_ID=your_oanda_account_id
+```

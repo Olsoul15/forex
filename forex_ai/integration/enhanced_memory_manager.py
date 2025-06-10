@@ -278,8 +278,8 @@ class EnhancedMemoryManager:
         Returns:
             Context ID of the stored analysis
         """
-        # Generate a unique ID for this context
-        context_id = str(uuid.uuid4())
+        # Generate a unique ID for this context if not provided
+        context_id = analysis_result.get("context_id") or str(uuid.uuid4())
 
         # Create context object
         context = AnalysisContext(
@@ -307,34 +307,20 @@ class EnhancedMemoryManager:
 
     async def _store_context(self, context_dict: Dict[str, Any]) -> None:
         """
-        Store a context in memory.
+        Store context in cache and optionally in Supabase.
 
         Args:
             context_dict: Context data to store
         """
-        try:
-            # Add to in-memory cache
-            self._add_to_memory_cache(context_dict)
+        # Add to in-memory cache
+        self._add_to_memory_cache(context_dict)
 
-            # Store in Supabase if enabled
-            if self.use_supabase and self.supabase_service:
+        # Store in Supabase if enabled
+        if self.use_supabase and self.supabase_service:
+            try:
                 await self.supabase_service.store_context(context_dict)
-                return
-
-            # Legacy storage if Supabase not enabled
-            # Convert complex types to JSON strings for storage
-            context = context_dict.copy()
-            for field in ["findings", "related_contexts", "tags", "metadata"]:
-                if isinstance(context.get(field), (dict, list)):
-                    context[field] = json.dumps(context[field])
-
-            # Store in database
-            await self.db_client.table(self.memory_schema["analysis_results"]).insert(
-                context
-            ).execute()
-
-        except Exception as e:
-            logger.error(f"Error storing context: {str(e)}")
+            except Exception as e:
+                logger.error(f"Error storing context to Supabase: {str(e)}")
 
     async def _create_embeddings(
         self, context_id: str, context_data: Dict[str, Any]

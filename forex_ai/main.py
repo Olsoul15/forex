@@ -21,6 +21,13 @@ from collections import Counter
 from tqdm import tqdm
 import textwrap
 
+import uvicorn
+import logging.config
+import yaml
+import asyncio
+from typing import List
+from forex_ai.models.llm_controller import LLMController
+
 # Specify the path to your .env file
 dotenv_path = r"C:\Users\17602\OneDrive\Desktop\mslearn-openai\Labfiles\02-azure-openai-api\Python\.env"
 load_dotenv(dotenv_path)
@@ -201,3 +208,37 @@ rater_prompt = [
 response = client.chat.completions.create(model=deployment_name, messages=rater_prompt)
 
 print(textwrap.fill(response.choices[0].message.content, width=100))
+
+def get_llm_controller() -> LLMController:
+    return LLMController()
+
+async def main():
+    """Main function to initialize and run the application."""
+    logger.info("Starting Forex AI Trading System")
+
+    # Initialize LLM Controller
+    llm_controller = get_llm_controller()
+    llm_status = llm_controller.get_status()
+    logger.info(f"LLM Client Status: {llm_status}")
+
+    if not llm_status.get("vertex_ai"):
+        logger.error("Vertex AI client not initialized. Please check your GCP configuration.")
+        return
+
+    # Example of how you might use the controller
+    # This is a placeholder for your actual application logic
+    logger.info("Forex AI system components are being initialized...")
+    await asyncio.sleep(2)  # Simulate async setup
+    logger.info("System initialized successfully.")
+
+
+if __name__ == "__main__":
+    # To run the application, you would typically use an ASGI server like uvicorn
+    # For example: uvicorn forex_ai.main:app --reload
+    # This main block is for demonstration or direct execution purposes.
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Application shut down by user.")
+    except Exception as e:
+        logger.critical(f"A critical error occurred: {e}", exc_info=True)
