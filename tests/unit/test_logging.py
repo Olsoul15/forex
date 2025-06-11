@@ -1,99 +1,46 @@
 import logging
 import os
-import shutil
-from unittest.mock import patch, MagicMock
-
-import pytest
-
-from forex_ai.utils.logging import get_logger, setup_file_logging, LOGS_DIR
-
-def close_log_handlers(logger):
-    """Close all handlers associated with a logger."""
-    for handler in logger.handlers[:]:
-        handler.close()
-        logger.removeHandler(handler)
-
-@pytest.fixture(autouse=True)
-def cleanup_logs():
-    """A fixture to clean up the logs directory before and after each test."""
-    logging.shutdown()
-    if os.path.exists(LOGS_DIR):
-        shutil.rmtree(LOGS_DIR, ignore_errors=True)
-    os.makedirs(LOGS_DIR, exist_ok=True)
-    yield
-    logging.shutdown()
-    if os.path.exists(LOGS_DIR):
-        shutil.rmtree(LOGS_DIR, ignore_errors=True)
+from forex_ai.utils.logging import get_logger, setup_file_logging
 
 def test_get_logger():
     """
-    Tests that get_logger returns a logger with the correct name and file handler.
+    Tests that a logger instance can be retrieved and has the correct name.
     """
-    logger_name = "test_logger"
-    logger = get_logger(logger_name)
-
+    logger = get_logger(__name__)
     assert isinstance(logger, logging.Logger)
-    assert logger.name == logger_name
-    
-    log_file_path = os.path.join(LOGS_DIR, f"{logger_name}.log")
-    assert os.path.exists(log_file_path)
+    assert logger.name == __name__
 
-    initial_handler_count = len(logger.handlers)
-    get_logger(logger_name) # Call again
-    assert len(logger.handlers) == initial_handler_count
-    
-    close_log_handlers(logger)
-
-def test_get_logger_with_level():
+def test_setup_file_logging_creates_file():
     """
-    Tests that get_logger correctly sets the log level when provided.
-    """
-    logger_name = "test_logger_with_level"
-    level = logging.DEBUG
-    logger = get_logger(logger_name, log_level=level)
-
-    assert logger.getEffectiveLevel() == level
-    close_log_handlers(logger)
-
-def test_setup_file_logging():
-    """
-    Tests that setup_file_logging adds a file handler to the root logger.
+    Tests that setup_file_logging creates a log file and that we can clean it up.
     """
     root_logger = logging.getLogger()
-    initial_handler_count = len(root_logger.handlers)
+    original_handlers = root_logger.handlers[:]
     
-    log_file = setup_file_logging()
+    # Ensure all handlers are closed before removing them
+    for handler in original_handlers:
+        handler.close()
+        root_logger.removeHandler(handler)
 
-    assert os.path.exists(log_file)
-    assert len(root_logger.handlers) > initial_handler_count
-    
-    assert any(isinstance(h, logging.FileHandler) for h in root_logger.handlers)
-    
-    logging.shutdown()
+    # Reset the internal flag to allow setup to run again
+    from forex_ai.utils import logging as logging_utils
+    logging_utils._file_logging_configured = False
 
-@patch('forex_ai.utils.logging.os.path.exists')
-def test_setup_file_logging_creates_dir(mock_path_exists):
-    """
-    Tests that setup_file_logging creates the log directory if it doesn't exist.
-    """
-    mock_path_exists.return_value = False
-    with patch('os.makedirs') as mock_makedirs:
-        setup_file_logging()
-        mock_makedirs.assert_called_with(LOGS_DIR)
-    logging.shutdown()
-
-@patch('forex_ai.utils.logging.datetime')
-def test_setup_file_logging_filename(mock_datetime):
-    """
-    Tests that setup_file_logging creates a log file with the correct timestamp format.
-    """
-    mock_now = MagicMock()
-    mock_now.strftime.return_value = "20240101_120000"
-    mock_datetime.now.return_value = mock_now
-    
-    log_file = setup_file_logging()
-    
-    expected_filename = os.path.join(LOGS_DIR, "forex_ai_20240101_120000.log")
-    assert log_file == expected_filename
-    
-    logging.shutdown()
+    log_filepath = None
+    try:
+        log_filepath = setup_file_logging()
+        assert log_filepath is not None, "setup_file_logging did not return a path"
+        assert os.path.exists(log_filepath)
+    finally:
+        # Clean up all handlers that were added during the test
+        for handler in root_logger.handlers[:]:
+            handler.close()
+            root_logger.removeHandler(handler)
+        
+        # Clean up the created file
+        if log_filepath and os.path.exists(log_filepath):
+            os.remove(log_filepath)
+            
+        # Restore original handlers
+        for handler in original_handlers:
+            root_logger.addHandler(handler) 

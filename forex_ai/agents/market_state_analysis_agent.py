@@ -14,113 +14,113 @@ from forex_ai.agents.base import BaseAgent
 from forex_ai.custom_types import AgentConfig, MarketData, SignalStrength
 
 # Import the MarketStateDetector
+# try:
+#     # First try importing from auto_agent path (if running in that context)
+#     from auto_agent.app.forex_ai.features.market_states import (
+#         MarketStateDetector,
+#         MarketStateType,
+#         MarketState,
+#         get_market_state_detector,
+#     )
+# except ImportError:
+#     # Fall back to regular forex_ai path
 try:
-    # First try importing from auto_agent path (if running in that context)
-    from auto_agent.app.forex_ai.features.market_states import (
+    from forex_ai.features.market_states import (
         MarketStateDetector,
         MarketStateType,
         MarketState,
         get_market_state_detector,
     )
 except ImportError:
-    # Fall back to regular forex_ai path
-    try:
-        from forex_ai.features.market_states import (
-            MarketStateDetector,
-            MarketStateType,
-            MarketState,
-            get_market_state_detector,
-        )
-    except ImportError:
-        # Define minimal versions for standalone operation if neither import works
-        from enum import Enum, auto
-        from dataclasses import dataclass
+    # Define minimal versions for standalone operation if neither import works
+    from enum import Enum, auto
+    from dataclasses import dataclass
 
-        class MarketStateType(Enum):
-            """Enum representing different market state types."""
+    class MarketStateType(Enum):
+        """Enum representing different market state types."""
 
-            STRONG_UPTREND = auto()
-            WEAK_UPTREND = auto()
-            STRONG_DOWNTREND = auto()
-            WEAK_DOWNTREND = auto()
-            RANGING = auto()
-            CONSOLIDATION = auto()
-            VOLATILITY_EXPANSION = auto()
-            VOLATILITY_CONTRACTION = auto()
-            POTENTIAL_REVERSAL_UP = auto()
-            POTENTIAL_REVERSAL_DOWN = auto()
-            BREAKOUT_UP = auto()
-            BREAKOUT_DOWN = auto()
-            UNDEFINED = auto()
+        STRONG_UPTREND = auto()
+        WEAK_UPTREND = auto()
+        STRONG_DOWNTREND = auto()
+        WEAK_DOWNTREND = auto()
+        RANGING = auto()
+        CONSOLIDATION = auto()
+        VOLATILITY_EXPANSION = auto()
+        VOLATILITY_CONTRACTION = auto()
+        POTENTIAL_REVERSAL_UP = auto()
+        POTENTIAL_REVERSAL_DOWN = auto()
+        BREAKOUT_UP = auto()
+        BREAKOUT_DOWN = auto()
+        UNDEFINED = auto()
 
-        @dataclass
-        class MarketState:
-            """Class representing a detected market state."""
+    @dataclass
+    class MarketState:
+        """Class representing a detected market state."""
 
-            state_type: MarketStateType
-            confidence: float
-            context: Dict[str, Any]
-            duration: int
+        state_type: MarketStateType
+        confidence: float
+        context: Dict[str, Any]
+        duration: int
 
-            def to_dict(self):
-                return {
-                    "state_type": self.state_type.name,
-                    "confidence": self.confidence,
-                    "duration": self.duration,
-                    "context": self.context,
-                }
+        def to_dict(self):
+            return {
+                "state_type": self.state_type.name,
+                "confidence": self.confidence,
+                "duration": self.duration,
+                "context": self.context,
+            }
 
-            @property
-            def is_trending(self) -> bool:
-                """Check if the state is a trending state."""
-                trending_states = [
-                    MarketStateType.STRONG_UPTREND,
-                    MarketStateType.WEAK_UPTREND,
-                    MarketStateType.STRONG_DOWNTREND,
-                    MarketStateType.WEAK_DOWNTREND,
-                ]
-                return self.state_type in trending_states
+        @property
+        def is_trending(self) -> bool:
+            """Check if the state is a trending state."""
+            trending_states = [
+                MarketStateType.STRONG_UPTREND,
+                MarketStateType.WEAK_UPTREND,
+                MarketStateType.STRONG_DOWNTREND,
+                MarketStateType.WEAK_DOWNTREND,
+            ]
+            return self.state_type in trending_states
 
-            @property
-            def is_ranging(self) -> bool:
-                """Check if the state is a ranging state."""
-                ranging_states = [
-                    MarketStateType.RANGING,
-                    MarketStateType.CONSOLIDATION,
-                ]
-                return self.state_type in ranging_states
+        @property
+        def is_ranging(self) -> bool:
+            """Check if the state is a ranging state."""
+            ranging_states = [
+                MarketStateType.RANGING,
+                MarketStateType.CONSOLIDATION,
+            ]
+            return self.state_type in ranging_states
 
-            @property
-            def is_reversal(self) -> bool:
-                """Check if the state is a reversal state."""
-                reversal_states = [
-                    MarketStateType.POTENTIAL_REVERSAL_UP,
-                    MarketStateType.POTENTIAL_REVERSAL_DOWN,
-                ]
-                return self.state_type in reversal_states
+        @property
+        def is_reversal(self) -> bool:
+            """Check if the state is a reversal state."""
+            reversal_states = [
+                MarketStateType.POTENTIAL_REVERSAL_UP,
+                MarketStateType.POTENTIAL_REVERSAL_DOWN,
+            ]
+            return self.state_type in reversal_states
 
-            @property
-            def is_breakout(self) -> bool:
-                """Check if the state is a breakout state."""
-                breakout_states = [
-                    MarketStateType.BREAKOUT_UP,
-                    MarketStateType.BREAKOUT_DOWN,
-                ]
-                return self.state_type in breakout_states
+        @property
+        def is_breakout(self) -> bool:
+            """Check if the state is a breakout state."""
+            breakout_states = [
+                MarketStateType.BREAKOUT_UP,
+                MarketStateType.BREAKOUT_DOWN,
+            ]
+            return self.state_type in breakout_states
 
-        class MarketStateDetector:
-            """Minimal implementation of MarketStateDetector."""
+    class MarketStateDetector:
+        """Minimal implementation of MarketStateDetector."""
 
-            def detect_market_state(self, pair, timeframe, features):
-                return MarketState(
-                    state_type=MarketStateType.UNDEFINED,
-                    confidence=0.0,
-                    context={},
-                    duration=0,
-                )
+        def detect_market_state(self, pair, timeframe, features):
+            return MarketState(
+                state_type=MarketStateType.UNDEFINED,
+                confidence=0.0,
+                context={},
+                duration=0,
+            )
 
-        def get_market_state_detector():
-            return MarketStateDetector()
+    def get_market_state_detector():
+        return MarketStateDetector()
 
 
 logger = logging.getLogger(__name__)

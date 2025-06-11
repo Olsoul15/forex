@@ -7,11 +7,11 @@ refined trading decisions.
 """
 
 from forex_ai.integration.enhanced_memory_manager import EnhancedMemoryManager
-from forex_ai.integration.autoagent_orchestrator import AutoAgentOrchestrator
+# from forex_ai.integration.autoagent_orchestrator import AutoAgentOrchestrator
 
 __all__ = [
     "EnhancedMemoryManager",
-    "AutoAgentOrchestrator",
+    # "AutoAgentOrchestrator",
 ]
 
 # Default configuration
@@ -24,25 +24,25 @@ DEFAULT_CONFIG = {
 }
 
 
-async def create_orchestrator(config=None):
-    """
-    Create and initialize an AutoAgent orchestrator.
-
-    Args:
-        config: Optional configuration dictionary
-
-    Returns:
-        Initialized orchestrator
-    """
-    # Merge provided config with defaults
-    merged_config = DEFAULT_CONFIG.copy()
-    if config:
-        merged_config.update(config)
-
-    # Create orchestrator
-    orchestrator = AutoAgentOrchestrator(merged_config)
-
-    # Initialize
-    await orchestrator.start()
-
-    return orchestrator
+# async def create_orchestrator(config=None):
+#     """
+#     Create and initialize an AutoAgent orchestrator.
+#
+#     Args:
+#         config: Optional configuration dictionary
+#
+#     Returns:
+#         Initialized orchestrator
+#     """
+#     # Merge provided config with defaults
+#     merged_config = DEFAULT_CONFIG.copy()
+#     if config:
+#         merged_config.update(config)
+#
+#     # Create orchestrator
+#     orchestrator = AutoAgentOrchestrator(merged_config)
+#
+#     # Initialize
+#     await orchestrator.start()
+#
+#     return orchestrator

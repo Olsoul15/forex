@@ -1,45 +1,21 @@
 # Core Web and API
-fastapi
-uvicorn
-flask
-flask-cors
-httpx
 requests
-sse-starlette
+websockets
+websocket-client
 
 # AI and ML
 google-cloud-aiplatform
-google-auth
-openai-whisper
 datasets
-evaluate
-faiss-cpu
-scikit-learn
-tensorflow
+openai
 
 # Data Processing and Technical Analysis
-backtrader
-joblib
 numpy
-oandapyV20
 pandas
 pandas-ta
-TA-Lib
-scipy
-
-# Database
-redis
-supabase
 
 # Utilities
-click
 python-dotenv
-psutil
-pydantic
-pydantic-settings
 pytubefix
-tenacity
-PyYAML
 
 # Visualization
 matplotlib
@@ -47,9 +23,9 @@ plotly
 
 # Testing
 pytest
-pytest-asyncio
-pytest-cov
-pytest-mock
+
+# Other
+IPython
 
 
 

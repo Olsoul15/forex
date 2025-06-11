@@ -6,7 +6,7 @@ with AutoAgent memory capabilities and adds functionality for storing and
 retrieving analysis contexts.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional, Union
 import json
 from pathlib import Path
@@ -15,7 +15,7 @@ import uuid
 from pydantic import BaseModel
 
 from forex_ai.agents.base import AgentMemory
-from AutoAgent.app_auto_agent.core.schema import Memory as AutoAgentMemory, Message
+# from AutoAgent.app_auto_agent.core.schema import Memory as AutoAgentMemory, Message
 
 
 class AnalysisContext(BaseModel):
@@ -61,7 +61,7 @@ class EnhancedAgentMemory(AgentMemory):
         """
         super().__init__(max_items)
         self.agent_id = agent_id or str(uuid.uuid4())
-        self.autoagent_memory = AutoAgentMemory()
+        # self.autoagent_memory = AutoAgentMemory()
         self.analysis_contexts: Dict[str, AnalysisContext] = {}
 
     def add_analysis_context(self, context: AnalysisContext) -> None:
@@ -73,17 +73,6 @@ class EnhancedAgentMemory(AgentMemory):
         """
         self.analysis_contexts[context.analysis_id] = context
 
-        # Also add as a system message to AutoAgent memory for LLM context
-        context_summary = (
-            f"Previous analysis (ID: {context.analysis_id}) for {context.pair} on {context.timeframe} "
-            f"timeframe from {context.timestamp.isoformat()}: "
-            f"{json.dumps(context.findings, indent=2)}"
-        )
-
-        # Add to AutoAgent memory as system message
-        system_message = Message.system_message(content=context_summary)
-        self.autoagent_memory.add_message(system_message)
-
         # Also add to standard memory
         self.add_observation(
             {
@@ -93,38 +82,76 @@ class EnhancedAgentMemory(AgentMemory):
             }
         )
 
+    def get_analysis_context(self, analysis_id: str) -> Optional[AnalysisContext]:
+        """
+        Get analysis context from memory.
+
+        Args:
+            analysis_id: ID of the analysis context to retrieve
+
+        Returns:
+            Analysis context if found, None otherwise
+        """
+        return self.analysis_contexts.get(analysis_id)
+
     def get_related_analyses(
         self,
         pair: str,
         timeframe: str,
-        analysis_type: Optional[str] = None,
         limit: int = 5,
+        max_days_lookback: int = 30,
     ) -> List[AnalysisContext]:
         """
-        Get related analyses from memory.
+        Get related analysis contexts based on pair and timeframe.
 
         Args:
             pair: Currency pair
-            timeframe: Time frame for analysis
-            analysis_type: Type of analysis (optional filter)
-            limit: Maximum number of analyses to return
+            timeframe: Time frame
+            limit: Maximum number of related contexts to return
+            max_days_lookback: Maximum number of days to look back
 
         Returns:
             List of related analysis contexts
         """
-        # Filter contexts by pair and timeframe
-        filtered = [
-            ctx
-            for ctx in self.analysis_contexts.values()
-            if ctx.pair == pair and ctx.timeframe == timeframe
-        ]
+        cutoff_date = datetime.now() - timedelta(days=max_days_lookback)
+        related_contexts = []
 
-        # Further filter by analysis type if specified
-        if analysis_type:
-            filtered = [ctx for ctx in filtered if ctx.analysis_type == analysis_type]
+        for context in self.analysis_contexts.values():
+            if (
+                context.pair == pair
+                and context.timeframe == timeframe
+                and context.timestamp >= cutoff_date
+            ):
+                related_contexts.append(context)
 
-        # Sort by timestamp (newest first) and limit
-        return sorted(filtered, key=lambda x: x.timestamp, reverse=True)[:limit]
+        # Sort by timestamp (most recent first) and return the top `limit`
+        related_contexts.sort(key=lambda x: x.timestamp, reverse=True)
+        return related_contexts[:limit]
+
+    def get_contextual_summary(self, pair: str, timeframe: str) -> str:
+        """
+        Get a contextual summary from recent analyses.
+
+        Args:
+            pair: Currency pair
+            timeframe: Time frame
+
+        Returns:
+            Contextual summary string
+        """
+        contexts = self.get_related_analyses(pair, timeframe)
+        if not contexts:
+            return "No recent analysis context available."
+
+        summary = "Recent analysis summary:\n"
+        for ctx in contexts:
+            summary += (
+                f"- {ctx.timestamp.isoformat()}: {ctx.analysis_type} analysis "
+                f"with confidence {ctx.confidence:.2f}. "
+                f"Findings: {json.dumps(ctx.findings)}\n"
+            )
+
+        return summary
 
     def get_sequential_context(self, limit: int = 10) -> str:
         """
@@ -162,21 +189,11 @@ class EnhancedAgentMemory(AgentMemory):
 
         return result
 
-    def get_autoagent_memory(self) -> AutoAgentMemory:
+    def save_to_file(self, file_path: Union[str, Path]) -> None:
         """
-        Get the AutoAgent memory object.
-
-        Returns:
-            AutoAgent memory instance
-        """
-        return self.autoagent_memory
-
-    def merge_with_autoagent_memory(self, messages: List[Message]) -> None:
-        """
-        Merge external AutoAgent messages into memory.
+        Save the memory to a file.
 
         Args:
-            messages: List of AutoAgent messages to merge
+            file_path: Path to the file where the memory will be saved
         """
-        for message in messages:
-            self.autoagent_memory.add_message(message)
+        pass

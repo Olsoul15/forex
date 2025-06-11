@@ -7,7 +7,7 @@ from datetime import datetime
 import json
 
 from langchain.tools import BaseTool
-from langchain.pydantic_v1 import BaseModel, Field
+from pydantic.v1 import BaseModel, Field
 from forex_ai.analysis.technical import TechnicalAnalyzer
 from forex_ai.analysis.sentiment import FinancialSentimentAnalyzer
 from forex_ai.analysis.impact_prediction import ImpactPredictor
@@ -28,12 +28,12 @@ class MarketAnalysisInput(BaseModel):
 class TechnicalAnalysisTool(BaseTool):
     """Tool for performing technical analysis on forex pairs."""
 
-    name = "technical_analysis"
-    description = """
+    name: str = "technical_analysis"
+    description: str = """
     Analyze technical indicators and price patterns for a forex pair.
     Provides insights on trends, support/resistance levels, and trading signals.
     """
-    args_schema = MarketAnalysisInput
+    args_schema: type[BaseModel] = MarketAnalysisInput
 
     def __init__(self):
         super().__init__()
@@ -63,12 +63,12 @@ class TechnicalAnalysisTool(BaseTool):
 class SentimentAnalysisTool(BaseTool):
     """Tool for analyzing market sentiment from news and social media."""
 
-    name = "sentiment_analysis"
-    description = """
+    name: str = "sentiment_analysis"
+    description: str = """
     Analyze market sentiment from financial news and social media.
     Provides sentiment scores and key topics affecting the market.
     """
-    args_schema = MarketAnalysisInput
+    args_schema: type[BaseModel] = MarketAnalysisInput
 
     def __init__(self):
         super().__init__()
@@ -106,12 +106,12 @@ class SentimentAnalysisTool(BaseTool):
 class MarketImpactTool(BaseTool):
     """Tool for predicting market impact of events and news."""
 
-    name = "market_impact"
-    description = """
+    name: str = "market_impact"
+    description: str = """
     Predict potential market impact of events and news.
     Provides impact probability and expected price movement ranges.
     """
-    args_schema = MarketAnalysisInput
+    args_schema: type[BaseModel] = MarketAnalysisInput
 
     def __init__(self):
         super().__init__()

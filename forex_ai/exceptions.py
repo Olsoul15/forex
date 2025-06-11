@@ -73,6 +73,24 @@ class DataProcessingError(DataError):
     pass
 
 
+class DataConnectorError(DataError):
+    """Base exception for data connector-related errors."""
+
+    pass
+
+
+class WebSocketError(DataConnectorError):
+    """Raised for WebSocket-related errors."""
+
+    pass
+
+
+class NewsFetchingError(DataFetchError):
+    """Raised when fetching news fails."""
+
+    pass
+
+
 # Trading Exceptions
 class TradingError(ForexAiError):
     """Base exception for trading-related errors."""
@@ -251,6 +269,12 @@ class ModelInferenceError(ModelError):
 
 class ModelLoadingError(ModelError):
     """Raised when model loading fails."""
+
+    pass
+
+
+class LLMError(ModelError):
+    """Base exception for LLM-related errors."""
 
     pass
 

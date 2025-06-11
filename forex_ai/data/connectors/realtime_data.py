@@ -17,7 +17,6 @@ import plotly.graph_objects as go
 from forex_ai.config.settings import get_settings
 from forex_ai.exceptions import DataConnectorError
 from forex_ai.data.connectors.base import DataConnector
-from forex_ai.data.models import Candle
 from forex_ai.custom_types import MarketDataPoint, CurrencyPair, TimeFrame
 
 logger = logging.getLogger(__name__)

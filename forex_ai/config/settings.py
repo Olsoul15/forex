@@ -68,7 +68,7 @@ class Settings(BaseSettings):
             password=values.get("POSTGRES_PASSWORD"),
             host=values.get("POSTGRES_HOST"),
             port=int(values.get("POSTGRES_PORT")),
-            path=f"/{values.get('POSTGRES_DB') or ''}",
+            path=f"{values.get('POSTGRES_DB') or ''}",
         )
 
     # Redis settings
@@ -101,7 +101,7 @@ class Settings(BaseSettings):
             password=values.get("REDIS_PASSWORD"),
             host=values.get("REDIS_HOST"),
             port=int(values.get("REDIS_PORT")),
-            path="/0",
+            path="0",
         )
 
     # Supabase settings

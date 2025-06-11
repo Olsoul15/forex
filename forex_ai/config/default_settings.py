@@ -86,14 +86,6 @@ DEFAULT_SETTINGS = {
     },
     # AutoAgent integration settings
     "integrations": {
-        "autoagent": {
-            "enabled": True,
-            "api_key": "",
-            "base_url": "https://api.autoagent.ai/v1",
-            "default_model": "gpt-4",
-            "request_timeout": 60,
-            "max_tokens": 4000,
-        }
     },
     # Logging settings
     "logging": {

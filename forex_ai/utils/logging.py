@@ -7,12 +7,13 @@ import logging
 import os
 import sys
 from datetime import datetime
+from pydantic import BaseModel
 
-# Define a project-relative base directory for logs
-LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'logs')
-if not os.path.exists(LOGS_DIR):
-    os.makedirs(LOGS_DIR)
+LOG_LEVELS = ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
+LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs")
 
+# Ensure the logs directory exists
+os.makedirs(LOGS_DIR, exist_ok=True)
 
 # Configure root logger
 if not logging.getLogger().hasHandlers():
@@ -41,46 +42,30 @@ def get_logger(name, log_level=None):
     # Override log level if specified
     if log_level:
         logger.setLevel(log_level)
-        
-    # Ensure a file handler is attached for this logger
-    log_file = os.path.join(LOGS_DIR, f"{name.replace('.', '_')}.log")
-    file_handler = logging.FileHandler(log_file)
-    formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    )
-    file_handler.setFormatter(formatter)
-    
-    # Avoid adding duplicate handlers
-    if not any(isinstance(h, logging.FileHandler) and h.baseFilename == file_handler.baseFilename for h in logger.handlers):
-        logger.addHandler(file_handler)
 
+    # Ensure a file handler is attached for this logger if none exists on the root logger
+    if not any(isinstance(h, logging.FileHandler) for h in logging.getLogger().handlers):
+        setup_file_logging()
 
     return logger
 
 
-def setup_file_logging(log_dir=None):
+_file_logging_configured = False
+
+def setup_file_logging():
     """
-    Set up file logging in addition to console logging.
-
-    Args:
-        log_dir: Directory to store log files. Defaults to the project's logs directory.
+    Create a timestamped log file and add a file handler to the root logger.
     """
-    if log_dir is None:
-        log_dir = LOGS_DIR
-        
-    # Create logs directory if it doesn't exist
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
+    global _file_logging_configured
+    if _file_logging_configured:
+        return
 
-    # Create a unique log filename with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = os.path.join(log_dir, f"forex_ai_{timestamp}.log")
+    if not os.path.exists(LOGS_DIR):
+        os.makedirs(LOGS_DIR)
 
-    # Create file handler
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setLevel(logging.DEBUG)
-
-    # Create formatter
+    log_filename = f"forex_ai_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_filepath = os.path.join(LOGS_DIR, log_filename)
+    file_handler = logging.FileHandler(log_filepath)
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
@@ -89,5 +74,6 @@ def setup_file_logging(log_dir=None):
     # Add file handler to root logger
     root_logger = logging.getLogger()
     root_logger.addHandler(file_handler)
+    _file_logging_configured = True
 
-    return log_file
+    return log_filepath
