@@ -68,7 +68,8 @@ RUN apt-get update \
 
 # Copy requirements and install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir uvicorn fastapi gunicorn
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir uvicorn fastapi gunicorn sse-starlette
 
 # Copy Python packages and application code
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
