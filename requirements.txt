@@ -1,10 +1,18 @@
 # Core Web and API
-fastapi
-requests
-websockets
-websocket-client
-flask
-flask-cors
+fastapi>=0.68.0
+requests>=2.26.0
+websockets>=10.0
+websocket-client>=1.2.1
+flask>=2.0.1
+flask-cors>=3.0.10
+redis>=4.0.0
+oandapyV20>=0.7.2
+langchain>=0.1.0
+langchain-google-vertexai>=0.0.1
+python-multipart>=0.0.6
+sse-starlette>=1.6.5
+starlette>=0.27.0
+typing-extensions>=4.0.0
 
 # AI and ML
 google-cloud-aiplatform
@@ -19,7 +27,17 @@ pandas-ta
 python-dotenv
 pytubefix
 colorama
-pydantic
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+PyJWT
+supabase>=2.15.3
+postgrest>=0.13.0
+gotrue>=2.1.0
+realtime>=1.0.0
+storage3>=0.7.0
+tenacity>=8.2.0
+PyYAML>=6.0.1
+psutil>=5.9.0
 
 # Visualization
 matplotlib

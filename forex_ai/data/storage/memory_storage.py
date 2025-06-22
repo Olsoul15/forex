@@ -11,10 +11,12 @@ import fnmatch
 import sys
 from typing import Any, Dict, List, Optional, Mapping, Callable, Tuple
 from collections import defaultdict
+from datetime import datetime, timedelta
 
 from forex_ai.data.storage.base import CompleteStorage
+from forex_ai.utils.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 class Lock:
     """Simple lock implementation with timeout support."""
@@ -48,7 +50,11 @@ class MemoryStorage(CompleteStorage):
         self._cleanup_interval = 60  # seconds
         self._max_memory = 1024 * 1024 * 1024  # 1GB
         self._memory_threshold = 0.9  # 90% of max memory
-        self._start_cleanup_task()
+        self._cleanup_running = False
+        self._cleanup_task = None
+        
+        # Don't start cleanup task in __init__
+        # It will be started when the application starts
     
     def _serialize(self, value: Any) -> str:
         """Serialize value to string with improved error handling."""
@@ -89,14 +95,26 @@ class MemoryStorage(CompleteStorage):
         
         return total_bytes, total_bytes / self._max_memory
     
-    def _start_cleanup_task(self):
+    async def start(self):
         """Start the cleanup task."""
-        if not self._closed:
-            asyncio.create_task(self._cleanup_loop())
+        if not self._cleanup_running:
+            self._cleanup_running = True
+            self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+    
+    async def stop(self):
+        """Stop the cleanup task."""
+        if self._cleanup_running:
+            self._cleanup_running = False
+            if self._cleanup_task:
+                self._cleanup_task.cancel()
+                try:
+                    await self._cleanup_task
+                except asyncio.CancelledError:
+                    pass
     
     async def _cleanup_loop(self):
         """Periodic cleanup loop."""
-        while not self._closed:
+        while self._cleanup_running:
             try:
                 await self._cleanup_expired()
                 await self._check_memory_usage()

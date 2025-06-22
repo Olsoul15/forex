@@ -6,8 +6,13 @@ This module provides logging functions and configuration for the Forex AI system
 import logging
 import os
 import sys
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
+from typing import Optional
 from datetime import datetime
 from pydantic import BaseModel
+
+from forex_ai.config.settings import get_settings
 
 LOG_LEVELS = ["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"]
 LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs")
@@ -15,40 +20,63 @@ LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs"
 # Ensure the logs directory exists
 os.makedirs(LOGS_DIR, exist_ok=True)
 
-# Configure root logger
-if not logging.getLogger().hasHandlers():
+def setup_logging(log_level: Optional[str] = None) -> None:
+    """
+    Set up logging configuration.
+    
+    Args:
+        log_level: Optional override for log level
+    """
+    settings = get_settings()
+    
+    # Determine log level
+    level = log_level or settings.LOG_LEVEL
+    numeric_level = getattr(logging, level.upper(), logging.INFO)
+    
+    # Create logs directory if it doesn't exist
+    log_dir = Path(settings.LOG_DIR)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Configure logging format
+    log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    date_format = '%Y-%m-%d %H:%M:%S'
+    
+    # Configure root logger
     logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        level=numeric_level,
+        format=log_format,
+        datefmt=date_format,
         handlers=[
-            logging.StreamHandler(sys.stdout)
+            logging.StreamHandler(sys.stdout),
+            RotatingFileHandler(
+                log_dir / 'forex_ai.log',
+                maxBytes=10 * 1024 * 1024,  # 10MB
+                backupCount=5,
+                encoding='utf-8'
+            )
         ]
     )
+    
+    # Set log levels for specific loggers
+    logging.getLogger('uvicorn').setLevel(logging.INFO)
+    logging.getLogger('fastapi').setLevel(logging.INFO)
+    
+    # Log startup information
+    logger = logging.getLogger(__name__)
+    logger.info(f"Logging initialized at level: {level}")
+    logger.info(f"Log directory: {log_dir}")
 
-def get_logger(name, log_level=None):
+def get_logger(name: str) -> logging.Logger:
     """
-    Get a configured logger instance.
-
+    Get a logger instance.
+    
     Args:
-        name: Name of the logger
-        log_level: Optional log level to override default
-
+        name: Logger name (usually __name__)
+        
     Returns:
         Logger instance
     """
-    logger = logging.getLogger(name)
-
-    # Override log level if specified
-    if log_level:
-        logger.setLevel(log_level)
-
-    # Ensure a file handler is attached for this logger if none exists on the root logger
-    if not any(isinstance(h, logging.FileHandler) for h in logging.getLogger().handlers):
-        setup_file_logging()
-
-    return logger
-
+    return logging.getLogger(name)
 
 _file_logging_configured = False
 

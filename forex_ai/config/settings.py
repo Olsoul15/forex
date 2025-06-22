@@ -3,7 +3,7 @@ Core settings and configuration for the Forex AI Trading System.
 
 This module provides a centralized configuration management system
 using Pydantic's Settings management. It handles loading configuration
-from environment variables, with appropriate type conversion and validation.
+from environment variables with appropriate type conversion and validation.
 """
 
 import os
@@ -32,14 +32,21 @@ class Settings(BaseSettings):
     Application settings.
 
     This class uses Pydantic's BaseSettings to handle configuration
-    from environment variables, with appropriate validation.
+    from environment variables with appropriate validation.
     """
 
     # Environment settings
     ENVIRONMENT: str = Field("development", env="ENVIRONMENT")
-    DEBUG: bool = Field(False, env="DEBUG")
+    DEBUG: bool = Field(True, env="DEBUG")
     LOG_LEVEL: str = Field("INFO", env="LOG_LEVEL")
-    FOREX_AI_DEV_MODE: bool = Field(False, env="FOREX_AI_DEV_MODE")  # Disable development mode by default to use real data
+    FOREX_AI_DEV_MODE: bool = Field(False, env="FOREX_AI_DEV_MODE")
+
+    # Supabase settings
+    SUPABASE_URL: str = Field("", env="SUPABASE_URL")
+    SUPABASE_KEY: str = Field("", env="SUPABASE_KEY")
+    SUPABASE_SERVICE_KEY: str = Field("", env="SUPABASE_SERVICE_KEY")
+    SUPABASE_JWT_SECRET: Optional[str] = Field(None, env="SUPABASE_JWT_SECRET")
+    SUPABASE_JWT_EXPIRY: int = Field(3600, env="SUPABASE_JWT_EXPIRY")
 
     # Database settings
     POSTGRES_USER: str = Field("postgres", env="POSTGRES_USER")
@@ -81,7 +88,7 @@ class Settings(BaseSettings):
     # Redis settings
     REDIS_HOST: str = Field("localhost", env="REDIS_HOST")
     REDIS_PORT: int = Field(6379, env="REDIS_PORT")
-    REDIS_DB: int = Field(0, env="REDIS_DB")
+    REDIS_DB: Optional[int] = Field(None, env="REDIS_DB")
     REDIS_PASSWORD: str = Field("", env="REDIS_PASSWORD")
     REDIS_SSL: bool = Field(False, env="REDIS_SSL")
     REDIS_URL: Optional[RedisDsn] = Field(None, env="REDIS_URL")
@@ -97,28 +104,21 @@ class Settings(BaseSettings):
             return v
 
         values = info.data
-        required_keys = ["REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD"]
-        missing_keys = [k for k in required_keys if k not in values or not values[k]]
-        if missing_keys:
-            missing = ", ".join(missing_keys)
-            raise ValueError(f"Missing required Redis configuration: {missing}")
+        # Make Redis optional
+        if not values.get("REDIS_HOST"):
+            return None
 
-        return RedisDsn.build(
-            scheme="redis",
-            password=values.get("REDIS_PASSWORD"),
-            host=values.get("REDIS_HOST"),
-            port=int(values.get("REDIS_PORT")),
-            path="0",
-        )
-
-    # Supabase settings
-    SUPABASE_URL: str = Field(
-        "https://your-project-url.supabase.co", env="SUPABASE_URL"
-    )
-    SUPABASE_KEY: str = Field("your-supabase-anon-key", env="SUPABASE_KEY")
-    SUPABASE_SERVICE_KEY: str = Field("your-supabase-service-key", env="SUPABASE_SERVICE_KEY")
-    SUPABASE_JWT_SECRET: Optional[str] = Field(None, env="SUPABASE_JWT_SECRET")
-    SUPABASE_JWT_EXPIRY: int = Field(3600, env="SUPABASE_JWT_EXPIRY")  # 1 hour
+        try:
+            return RedisDsn.build(
+                scheme="redis",
+                password=values.get("REDIS_PASSWORD", ""),
+                host=values.get("REDIS_HOST", "localhost"),
+                port=int(values.get("REDIS_PORT", 6379)),
+                path=str(values.get("REDIS_DB", 0)),
+            )
+        except Exception as e:
+            logger.warning(f"Failed to build Redis URL: {e}")
+            return None
 
     # OANDA Proxy URL (used by TA Service)
     OANDA_PROXY_URL: str = Field("http://localhost:8002", env="OANDA_PROXY_URL")
@@ -140,21 +140,21 @@ class Settings(BaseSettings):
     TA_SERVICE_PORT: int = Field(8003, env="TA_PORT")
 
     # External API settings
-    ALPHA_VANTAGE_API_KEY: str = Field("placeholder", env="ALPHA_VANTAGE_API_KEY")
-    TRADING_VIEW_API_KEY: str = Field("placeholder", env="TRADING_VIEW_API_KEY")
-    THE_NEWS_API_KEY: str = Field("placeholder", env="THE_NEWS_API_KEY")
+    ALPHA_VANTAGE_API_KEY: Optional[str] = Field(None, env="ALPHA_VANTAGE_API_KEY")
+    TRADING_VIEW_API_KEY: Optional[str] = Field(None, env="TRADING_VIEW_API_KEY")
+    THE_NEWS_API_KEY: Optional[str] = Field(None, env="THE_NEWS_API_KEY")
     YOUTUBE_API_KEY: Optional[str] = Field(None, env="YOUTUBE_API_KEY")
 
     # AI model settings
-    AZURE_OPENAI_KEY: str = Field("placeholder", env="AZURE_OPENAI_KEY")
-    AZURE_OPENAI_ENDPOINT: str = Field("placeholder", env="AZURE_OPENAI_ENDPOINT")
+    AZURE_OPENAI_KEY: Optional[str] = Field(None, env="AZURE_OPENAI_KEY")
+    AZURE_OPENAI_ENDPOINT: Optional[str] = Field(None, env="AZURE_OPENAI_ENDPOINT")
     AZURE_OPENAI_API_VERSION: str = Field(
         "2024-02-15-preview", env="AZURE_OPENAI_API_VERSION"
     )
-    OPENAI_API_KEY: str = Field("placeholder", env="OPENAI_API_KEY")
-    GROQ_API_KEY: str = Field("placeholder", env="GROQ_API_KEY")
-    OPENROUTER_API_KEY: str = Field("placeholder", env="OPENROUTER_API_KEY")
-    GOOGLE_API_KEY: str = Field("placeholder", env="GOOGLE_API_KEY")
+    OPENAI_API_KEY: Optional[str] = Field(None, env="OPENAI_API_KEY")
+    GROQ_API_KEY: Optional[str] = Field(None, env="GROQ_API_KEY")
+    OPENROUTER_API_KEY: Optional[str] = Field(None, env="OPENROUTER_API_KEY")
+    GOOGLE_API_KEY: Optional[str] = Field(None, env="GOOGLE_API_KEY")
     GCP_LOCATION: str = Field("us-central1", env="GCP_LOCATION")
 
     # Default model selections
@@ -195,8 +195,8 @@ class Settings(BaseSettings):
     # MCP Server settings
     MCP_HOST: str = Field("localhost", env="MCP_HOST")
     MCP_PORT: int = Field(8080, env="MCP_PORT")
-    MCP_API_KEY: str = Field("placeholder", env="MCP_API_KEY")
-    MCP_SECRET: str = Field("placeholder", env="MCP_SECRET")
+    MCP_API_KEY: Optional[str] = Field(None, env="MCP_API_KEY")
+    MCP_SECRET: Optional[str] = Field(None, env="MCP_SECRET")
 
     # Trading settings
     TRADING_ENABLED: bool = Field(False, env="TRADING_ENABLED")
@@ -207,16 +207,15 @@ class Settings(BaseSettings):
     RISK_PER_TRADE_PERCENT: float = Field(1.0, env="RISK_PER_TRADE_PERCENT")
 
     # Web dashboard settings
+    PORT: int = Field(8000, env="PORT")
     WEB_PORT: int = Field(8000, env="WEB_PORT")
-    JWT_SECRET_KEY: str = Field(
-        "placeholder_jwt_secret_key_for_development_only", env="JWT_SECRET_KEY"
-    )
+    JWT_SECRET_KEY: str = Field("", env="JWT_SECRET_KEY")
     JWT_ALGORITHM: str = Field("HS256", env="JWT_ALGORITHM")
     JWT_EXPIRE_MINUTES: int = Field(60, env="JWT_EXPIRE_MINUTES")
     ENABLE_DOCS: bool = Field(True, env="ENABLE_DOCS")
 
     # Workflow engine settings
-    WORKFLOW_ENABLED: bool = Field(True, env="WORKFLOW_ENABLED")
+    WORKFLOW_ENABLED: bool = Field(False, env="WORKFLOW_ENABLED")
     WORKFLOW_MAX_WORKERS: int = Field(4, env="WORKFLOW_MAX_WORKERS")
     WORKFLOW_RESULTS_TTL: int = Field(30, env="WORKFLOW_RESULTS_TTL")  # Days to keep results
 
@@ -251,7 +250,7 @@ class Settings(BaseSettings):
     # New settings
     API_HOST: str = Field("0.0.0.0", env="API_HOST")
     API_PORT: int = Field(8000, env="API_PORT")
-    API_WORKERS: int = Field(4, env="API_WORKERS")
+    API_WORKERS: int = Field(1, env="API_WORKERS")
     API_TIMEOUT: int = Field(60, env="API_TIMEOUT")
     API_RELOAD: bool = Field(True, env="API_RELOAD")
     API_DEBUG: bool = Field(True, env="API_DEBUG")
@@ -264,7 +263,7 @@ class Settings(BaseSettings):
     API_VERSION: str = Field("1.0.0", env="API_VERSION")
 
     # Security settings
-    SECRET_KEY: str = Field("forex_ai_development_secret_key_for_testing_only", env="SECRET_KEY")
+    SECRET_KEY: str = Field("", env="SECRET_KEY")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(60 * 24, env="ACCESS_TOKEN_EXPIRE_MINUTES")  # 1 day
     ALGORITHM: str = Field("HS256", env="ALGORITHM")
 
@@ -272,11 +271,6 @@ class Settings(BaseSettings):
     PROXY_HOST: str = Field("0.0.0.0", env="PROXY_HOST")
     PROXY_PORT: int = Field(8001, env="PROXY_PORT")
     PROXY_WORKERS: int = Field(2, env="PROXY_WORKERS")
-
-    # Workflow engine settings
-    WORKFLOW_ENABLED: bool = Field(True, env="WORKFLOW_ENABLED")
-    WORKFLOW_MAX_WORKERS: int = Field(4, env="WORKFLOW_MAX_WORKERS")
-    WORKFLOW_RESULTS_TTL: int = Field(30, env="WORKFLOW_RESULTS_TTL")  # Days to keep results
 
     # Path settings
     BASE_DIR: Path = Path(__file__).parent.parent
@@ -330,25 +324,76 @@ class Settings(BaseSettings):
                 )
         return values
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=True,
-        extra="allow",
-    )
+    @field_validator("WEB_PORT", mode="before")
+    @classmethod
+    def set_web_port(cls, v: Optional[int], info) -> int:
+        """Use PORT as fallback for WEB_PORT."""
+        if v is not None:
+            return v
+        return info.data.get("PORT", 8000)
 
+    @field_validator('SUPABASE_URL')
+    @classmethod
+    def validate_supabase_url(cls, v: str) -> str:
+        """Validate Supabase URL format."""
+        if not v:
+            return v
+        if "supabase.co" not in v:
+            raise ValueError(f"Invalid Supabase URL format: {v}")
+        return v
+
+    @field_validator('SUPABASE_KEY', 'SUPABASE_SERVICE_KEY')
+    @classmethod
+    def validate_supabase_keys(cls, v: str) -> str:
+        """Validate Supabase key format."""
+        if not v:
+            return v
+        if not v.startswith("ey"):
+            raise ValueError("Invalid Supabase key format")
+        return v
+
+    @root_validator(skip_on_failure=True)
+    def validate_required_settings(cls, values):
+        """Validate required settings based on environment."""
+        if values.get("ENVIRONMENT") == "production":
+            required_settings = {
+                "SECRET_KEY": "Secret key is required in production",
+                "SUPABASE_URL": "Supabase URL is required in production",
+                "SUPABASE_KEY": "Supabase key is required in production",
+                "SUPABASE_SERVICE_KEY": "Supabase service key is required in production",
+                "JWT_SECRET_KEY": "JWT secret key is required in production"
+            }
+            
+            for setting, message in required_settings.items():
+                if not values.get(setting):
+                    raise ValueError(f"{message}")
+                    
+        return values
+
+    model_config = SettingsConfigDict(
+        env_file=None,  # Disable .env file loading
+        extra="allow",
+        validate_default=True,
+    )
 
 @lru_cache()
 def get_settings() -> Settings:
     """
     Get application settings.
-
-    Uses lru_cache to cache settings for performance.
-
+    
     Returns:
-        Settings: Application settings
+        Settings instance with loaded configuration
     """
-    return Settings()
+    try:
+        settings = Settings()
+        logger.info(
+            f"Loaded settings for environment: {settings.ENVIRONMENT}"
+            f" (Debug: {settings.DEBUG})"
+        )
+        return settings
+    except Exception as e:
+        logger.critical(f"Failed to load settings: {str(e)}")
+        raise
 
 def get_env_var(primary_name: str, aliases: List[str] = None, default: Any = None) -> Any:
     """

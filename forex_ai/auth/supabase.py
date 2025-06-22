@@ -8,7 +8,7 @@ import time
 from typing import Dict, Any, Optional
 from functools import lru_cache
 
-from supabase import create_client, Client
+from supabase import Client
 from fastapi import Depends, HTTPException, status
 from fastapi.security import APIKeyHeader, HTTPBearer
 from pydantic import BaseModel
@@ -17,69 +17,52 @@ import jwt
 import requests
 
 from forex_ai.config.settings import get_settings
+from forex_ai.data.storage.supabase_base import get_base_supabase_client
 
 logger = logging.getLogger(__name__)
 
 # HTTP security scheme for bearer token
 security = HTTPBearer()
 
+# Global client instance
+_supabase_client = None
 
-# Pydantic models for authentication
-class UserCredentials(BaseModel):
-    """User credentials for login."""
-
-    email: str
-    password: str
-
-
-class UserRegistration(UserCredentials):
-    """User registration data."""
-
-    password_confirmation: str
-
-
-class AuthResponse(BaseModel):
-    """Authentication response with access token."""
-
-    access_token: str
-    token_type: str = "bearer"
-    user: Dict[str, Any]
-
-
-@lru_cache()
-def get_supabase_client() -> Client:
+def initialize_supabase() -> Optional[Client]:
     """
-    Get a Supabase client instance.
+    Initialize the Supabase client.
 
     Returns:
-        A Supabase client instance
+        Optional[Client]: The Supabase client instance or None if initialization fails
     """
+    global _supabase_client
+    
+    if _supabase_client is not None:
+        return _supabase_client
+
     try:
-        # Load environment variables
-        load_dotenv()
-
-        # Get Supabase credentials
-        supabase_url = os.getenv("SUPABASE_URL", "https://your-project-url.supabase.co")
-        supabase_key = os.getenv("SUPABASE_SERVICE_KEY", os.getenv("SUPABASE_KEY", "your-supabase-anon-key"))
+        settings = get_settings()
         
-        logger.info(f"Initializing Supabase client with URL: {supabase_url}")
+        # Check if required credentials are available
+        if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
+            logger.warning("Supabase credentials not provided. Authentication will be disabled.")
+            return None
 
-        # Validate credentials
-        if (supabase_url == "https://your-project-url.supabase.co" or 
-            supabase_key == "your-supabase-anon-key" or 
-            "supabase.co" not in supabase_url):
-            logger.critical("Invalid Supabase credentials provided!")
-            raise ValueError("Invalid Supabase credentials. Please set valid SUPABASE_URL and SUPABASE_KEY environment variables.")
-
-        # Create the real client
-        client = create_client(supabase_url, supabase_key)
-        # Just create the client without testing a specific table
-        logger.info("Successfully created Supabase client")
-        return client
+        _supabase_client = get_base_supabase_client()
+        logger.info("Supabase client initialized successfully")
+        return _supabase_client
     except Exception as e:
-        logger.critical(f"Failed to create Supabase client: {str(e)}")
-        raise ValueError(f"Failed to connect to Supabase: {str(e)}. Please check your credentials and connection.")
+        logger.error(f"Failed to initialize Supabase client: {str(e)}")
+        return None
 
+def get_supabase_client() -> Optional[Client]:
+    """
+    Get the Supabase client instance.
+
+    Returns:
+        Optional[Client]: The Supabase client instance or None if not initialized
+    """
+    global _supabase_client
+    return _supabase_client
 
 async def get_current_user(token: str = Depends(security)) -> Dict[str, Any]:
     """
@@ -92,11 +75,20 @@ async def get_current_user(token: str = Depends(security)) -> Dict[str, Any]:
         User data
 
     Raises:
-        HTTPException: If the token is invalid
+        HTTPException: If the token is invalid or authentication is disabled
     """
     try:
         # Get settings
         settings = get_settings()
+
+        # Check if authentication is enabled
+        client = get_supabase_client()
+        if client is None:
+            logger.warning("Authentication is disabled - no Supabase client available")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication service is not available",
+            )
 
         # Decode the token
         payload = jwt.decode(
@@ -114,8 +106,7 @@ async def get_current_user(token: str = Depends(security)) -> Dict[str, Any]:
             )
 
         # Get user data from Supabase
-        supabase_client = get_supabase_client()
-        response = supabase_client.table("users").select("*").eq("id", user_id).execute()
+        response = client.table("users").select("*").eq("id", user_id).execute()
 
         # Check if user exists
         if not response.data:
@@ -139,12 +130,45 @@ async def get_current_user(token: str = Depends(security)) -> Dict[str, Any]:
         )
 
 
+class UserCredentials(BaseModel):
+    """User credentials for login."""
+
+    email: str
+    password: str
+
+
+class UserRegistration(UserCredentials):
+    """User registration data."""
+
+    password_confirmation: str
+
+
+class AuthResponse(BaseModel):
+    """Authentication response with access token."""
+
+    access_token: str
+    token_type: str = "bearer"
+    user: Dict[str, Any]
+
+
 class SupabaseAuth:
     """Supabase authentication service."""
 
     def __init__(self):
         """Initialize the Supabase auth service."""
-        self.client = get_supabase_client()
+        self.client = None
+        self._initialized = False
+
+    async def ensure_initialized(self):
+        """Ensure the auth service is initialized."""
+        if not self._initialized:
+            try:
+                self.client = await get_supabase_client()
+                self._initialized = True
+                logger.info("Supabase auth service initialized")
+            except Exception as e:
+                logger.error(f"Failed to initialize Supabase auth service: {str(e)}")
+                raise ValueError(f"Failed to initialize Supabase auth service: {str(e)}")
 
     async def register(self, user_data: UserRegistration) -> AuthResponse:
         """
@@ -160,6 +184,8 @@ class SupabaseAuth:
             HTTPException: If registration fails
         """
         try:
+            await self.ensure_initialized()
+
             # Check if passwords match
             if user_data.password != user_data.password_confirmation:
                 raise HTTPException(
@@ -223,6 +249,8 @@ class SupabaseAuth:
             HTTPException: If login fails
         """
         try:
+            await self.ensure_initialized()
+
             # Login user with Supabase
             response = self.client.auth.sign_in({
                 "email": credentials.email,
@@ -279,15 +307,17 @@ class SupabaseAuth:
             HTTPException: If logout fails
         """
         try:
+            await self.ensure_initialized()
+
             # Logout user with Supabase
-            response = self.client.auth.sign_out()
+            self.client.auth.sign_out()
 
             # Return success message
-            return {"message": "Logged out successfully"}
+            return {"message": "Successfully logged out"}
         except Exception as e:
             logger.error(f"Error logging out user: {str(e)}")
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Logout failed: {str(e)}",
             )
 

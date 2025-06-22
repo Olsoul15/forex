@@ -10,11 +10,11 @@ from typing import Dict, List, Optional, Union, Any, Tuple
 from functools import lru_cache
 from contextlib import contextmanager
 
-from supabase import create_client, Client
+from supabase import Client
 
 from forex_ai.config.settings import get_settings
 from forex_ai.exceptions import DatabaseError, DatabaseConnectionError
-from forex_ai.auth.supabase import get_supabase_client
+from forex_ai.data.storage.supabase_base import get_base_supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class SupabaseClient:
         Initialize the Supabase client.
         """
         try:
-            self.client = get_supabase_client()
+            self.client = get_base_supabase_client()
             logger.info("Supabase client initialized")
         except Exception as e:
             logger.error(f"Failed to initialize Supabase client: {str(e)}")
@@ -252,13 +252,9 @@ class SupabaseClient:
                 on_conflict=on_conflict,
                 ignore_duplicates=ignore_duplicates,
                 returning=returning
-            ).execute() # ADDED execute()
-            logger.debug(f"Upsert successful on table '{table}'. Result data: {result.data}")
-            return result.data if returning == 'representation' else None
+            ).execute()
+            return result.data if result.data else []
         except Exception as e:
-            # Log the specific data that caused the error if possible (be cautious with sensitive data)
-            # truncated_data = str(data)[:200] # Example truncation
-            # logger.error(f"Error during upsert on table '{table}' with data (truncated): {truncated_data}")
             self._handle_error(e, f"upsert into '{table}'")
     
     def update(
@@ -266,68 +262,66 @@ class SupabaseClient:
         table: str,
         data: Dict[str, Any],
         where: Dict[str, Any],
-    ) -> Optional[List[Dict[str, Any]]]: # Return list of updated rows or None
+    ) -> Optional[List[Dict[str, Any]]]:
         """
         Update rows in a table.
-
+        
         Args:
             table: Table name.
-            data: Data to update.
+            data: Row data.
             where: Filter conditions.
-
+            
         Returns:
-            List of updated rows if successful, otherwise None.
-
+            List of updated rows.
+            
         Raises:
             DatabaseError: If updating fails.
         """
         try:
             query = self.client.table(table).update(data)
+            
             # Apply filters
             for key, value in where.items():
                 if isinstance(value, dict) and "operator" in value:
                     query = query.filter(key, value["operator"], value["value"])
                 else:
                     query = query.eq(key, value)
-            
-            # Execute synchronously
-            result = query.execute() # Use sync execute
-            logger.debug(f"Update successful on table '{table}'. Result data: {result.data}")
-            return result.data # Return the list of updated rows
+                    
+            result = query.execute()
+            return result.data if result.data else []
         except Exception as e:
-            self._handle_error(e, f"update on '{table}'")
+            self._handle_error(e, f"update in '{table}'")
     
     def delete(
         self,
         table: str,
         where: Dict[str, Any],
-    ) -> Optional[List[Dict[str, Any]]]: # Return list of deleted rows or None
+    ) -> Optional[List[Dict[str, Any]]]:
         """
         Delete rows from a table.
-
+        
         Args:
             table: Table name.
             where: Filter conditions.
-
+            
         Returns:
-           List of deleted rows if successful, otherwise None.
-
+            List of deleted rows.
+            
         Raises:
             DatabaseError: If deleting fails.
         """
         try:
-            query = self.client.table(table).delete()
+            query = self.client.table(table)
+            
             # Apply filters
             for key, value in where.items():
                 if isinstance(value, dict) and "operator" in value:
                     query = query.filter(key, value["operator"], value["value"])
                 else:
                     query = query.eq(key, value)
-
-            # Execute synchronously
-            result = query.execute() # Use sync execute
-            logger.debug(f"Delete successful on table '{table}'. Result data: {result.data}")
-            return result.data # Return the list of deleted rows
+                    
+            result = query.delete().execute()
+            return result.data if result.data else []
         except Exception as e:
             self._handle_error(e, f"delete from '{table}'")
     
@@ -338,19 +332,19 @@ class SupabaseClient:
     ) -> int:
         """
         Count rows in a table.
-
+        
         Args:
             table: Table name.
             where: Filter conditions.
-
+            
         Returns:
             Number of rows.
-
+            
         Raises:
             DatabaseError: If counting fails.
         """
         try:
-            query = self.client.table(table).select("*", count="exact") # Use exact count
+            query = self.client.table(table).select("*", count="exact")
             
             # Apply filters if provided
             if where:
@@ -359,45 +353,32 @@ class SupabaseClient:
                         query = query.filter(key, value["operator"], value["value"])
                     else:
                         query = query.eq(key, value)
-
-            # Execute synchronously
+                        
             result = query.execute()
-            return result.count if hasattr(result, 'count') else 0
+            return result.count if result.count is not None else 0
         except Exception as e:
-            self._handle_error(e, f"count on '{table}'")
+            self._handle_error(e, f"count in '{table}'")
     
     def execute_sql(self, sql: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Execute raw SQL via RPC function.
-        
-        Note: This requires setting up a database function in Supabase that can execute SQL.
+        Execute raw SQL.
         
         Args:
-            sql: SQL query to execute.
+            sql: SQL query.
             params: Query parameters.
             
         Returns:
-            Query results.
+            Query result.
             
         Raises:
-            DatabaseError: If execution fails.
-            NotImplementedError: If the RPC function is not set up.
+            DatabaseError: If executing fails.
         """
-        # This requires a SQL execution function to be created in Supabase
-        # Example:
-        # CREATE OR REPLACE FUNCTION execute_sql(query text, params jsonb DEFAULT '{}'::jsonb)
-        # RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
-        # DECLARE
-        #   result jsonb;
-        # BEGIN
-        #   EXECUTE query INTO result USING params;
-        #   RETURN result;
-        # END;
-        # $$;
-        
-        raise NotImplementedError("Raw SQL execution requires a database function setup in Supabase")
-
-    # select needs to be sync to match fetch_all/fetch_one
+        try:
+            result = self.client.rpc('execute_sql', {'sql': sql, 'params': params}).execute()
+            return result.data
+        except Exception as e:
+            self._handle_error(e, "execute_sql")
+    
     def select(
         self,
         table: str,
@@ -407,16 +388,21 @@ class SupabaseClient:
         limit: Optional[int] = None,
         offset: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
-        """ Wrapper for fetch_all for consistency if needed """
-        # This just calls the existing synchronous fetch_all
+        """
+        Alias for fetch_all.
+        """
         return self.fetch_all(table, columns, where, order_by, limit, offset)
+
 
 @lru_cache
 def get_supabase_db_client() -> SupabaseClient:
     """
-    Get a cached instance of the SupabaseClient.
+    Get a Supabase database client instance.
     
     Returns:
-        A SupabaseClient instance.
+        A Supabase database client instance.
+        
+    Raises:
+        DatabaseConnectionError: If connection fails.
     """
     return SupabaseClient() 

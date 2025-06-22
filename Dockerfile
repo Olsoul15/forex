@@ -31,12 +31,10 @@ RUN curl -L -o /tmp/ta-lib-0.4.0-src.tar.gz http://prdownloads.sourceforge.net/t
     && cd .. \
     && rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
 
-# Install sse-starlette first
-RUN pip install --no-cache-dir --no-deps sse-starlette>=1.6.5
-
-# Copy requirements and install dependencies
+# Install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
+RUN pip install --no-cache-dir sse-starlette>=1.6.5 \
+    && pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir uvicorn fastapi gunicorn
 
 # Copy application code
@@ -73,9 +71,6 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install sse-starlette first
-RUN pip install --no-cache-dir --no-deps sse-starlette>=1.6.5
-
 # Copy application code and dependencies
 COPY --from=builder /app /app
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
@@ -103,16 +98,5 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 # Expose port
 EXPOSE 8000
 
-# Start the application with gunicorn
-CMD exec gunicorn forex_ai.api.main:app \
-    --bind 0.0.0.0:$PORT \
-    --workers 1 \
-    --worker-class uvicorn.workers.UvicornWorker \
-    --timeout 300 \
-    --graceful-timeout 300 \
-    --keep-alive 5 \
-    --log-level info \
-    --access-logfile - \
-    --error-logfile - \
-    --capture-output \
-    --preload
+# Start the application with our run.py script
+CMD ["python", "run.py"]

@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 import websockets
 import json
 import asyncio
+import uvicorn
 
 from forex_ai.custom_types import CurrencyPair, TimeFrame, MarketData, TradingSignal
 from forex_ai.exceptions import (
@@ -44,7 +45,7 @@ from forex_ai.api.template_filters import (
     format_date,
 )
 from forex_ai.api.auth import router as auth_router
-from forex_ai.auth.supabase import get_current_user
+from forex_ai.auth.supabase import get_current_user, initialize_supabase, get_supabase_client
 from forex_ai.api.strategy_endpoints import (
     router as strategy_router,
     init_llm_strategy_integrator,
@@ -54,6 +55,9 @@ from forex_ai.api.broker_routes import router as broker_router
 from forex_ai.agents.framework.llm_strategy_integrator import LLMStrategyIntegrator
 from forex_ai.agents.framework.agent_manager import AgentManager
 from forex_ai.agents.framework.agent_types import UserQuery, SystemResponse
+from forex_ai.config.settings import get_settings
+from forex_ai.utils.logging import setup_logging, get_logger
+from forex_ai.data.storage.memory_storage import memory_storage
 
 # Import new v1 endpoints
 from forex_ai.api.v1.account_endpoints import router as account_router_v1
@@ -73,17 +77,21 @@ from forex_ai.backend_api.endpoints.docs_endpoints import router as backend_docs
 from forex_ai.backend_api.endpoints.strategy_endpoints_local import router as strategy_router_local
 from forex_ai.backend_api.endpoints.system_endpoints import router as system_router
 
-# Configure logging
-logger = logging.getLogger(__name__)
+# Set up logging
+setup_logging()
+logger = get_logger(__name__)
+
+# Get settings
+settings = get_settings()
 
 # Create FastAPI app
 app = FastAPI(
-    title="Forex AI Trading System",
-    description="API for the Forex AI Trading System",
-    version="1.0.0",
-    docs_url="/api/v1/docs",
-    redoc_url="/api/v1/redoc",
-    openapi_url="/api/v1/openapi.json",
+    title=settings.API_TITLE,
+    description=settings.API_DESCRIPTION,
+    version=settings.API_VERSION,
+    docs_url=settings.API_DOCS_URL if settings.ENABLE_DOCS else None,
+    redoc_url=settings.API_REDOC_URL if settings.ENABLE_DOCS else None,
+    openapi_url=settings.API_OPENAPI_URL if settings.ENABLE_DOCS else None,
 )
 
 # Add CORS middleware
@@ -181,11 +189,18 @@ async def health_check():
     """
     logger.info("Processing health check request")
     
+    # Get Supabase status
+    supabase_client = get_supabase_client()
+    supabase_status = "available" if supabase_client is not None else "unavailable"
+    
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "version": "1.0.0",
-        "api_version": "v1"
+        "api_version": "v1",
+        "services": {
+            "supabase": supabase_status
+        }
     }
 
 @app.post("/api/brokers/credentials", include_in_schema=False)
@@ -784,49 +799,35 @@ async def get_brokers_page(request: Request):
 # Update the startup event handler
 @app.on_event("startup")
 async def startup_event():
-    """Initialize components on application startup."""
+    """
+    Initialize services on application startup.
+    """
     try:
-        logger.info("Starting ForexAI API")
+        logger.info("Starting Forex AI Trading System")
+        
+        # Initialize memory storage
+        await memory_storage.start()
+        logger.info("Memory storage initialized")
+        
+        # Log configuration
+        logger.info(f"Environment: {settings.ENVIRONMENT}")
+        logger.info(f"Debug mode: {settings.DEBUG}")
+        logger.info(f"API port: {settings.API_PORT}")
+        
+        # Initialize Supabase client
+        logger.info("Initializing Supabase client...")
+        supabase_client = initialize_supabase()
+        if supabase_client is None:
+            logger.warning("Supabase initialization skipped - credentials not provided")
+        else:
+            logger.info("Supabase client initialized successfully")
 
-        # Initialize strategy repository
-        init_strategy_repository()
-        logger.info("Strategy repository initialized")
-
-        # Initialize LLM strategy integrator with Google Vertex AI config
-        llm_config = config.get("llm", {})
-
-        # Set default Google Vertex AI configuration if not present
-        if "provider" not in llm_config:
-            llm_config["provider"] = "vertex"
-
-        if "model_name" not in llm_config:
-            llm_config["model_name"] = "gemini-1.5-pro"
-
-        if "temperature" not in llm_config:
-            llm_config["temperature"] = 0.2
-
-        logger.info(f"Using LLM provider: {llm_config['provider']}")
-
-        # Initialize the LLM strategy integrator - make this optional
-        try:
-            init_llm_strategy_integrator(llm_config)
-            logger.info("LLM strategy integrator initialized")
-        except Exception as llm_error:
-            logger.warning(f"Failed to initialize LLM strategy integrator: {str(llm_error)}")
-            logger.warning("Continuing without LLM capabilities")
-
-        # Initialize agent manager
-        try:
-            global agent_manager
-            agent_manager = AgentManager()
-            logger.info("Agent manager initialized")
-        except Exception as agent_error:
-            logger.warning(f"Failed to initialize agent manager: {str(agent_error)}")
-            logger.warning("Continuing without agent framework")
-
+        # Initialize other services as needed
+        logger.info("Application startup completed successfully")
     except Exception as e:
-        logger.error(f"Error during startup: {str(e)}")
-        raise
+        logger.error(f"Error during application startup: {str(e)}")
+        # Don't raise the exception - let the app start even if some services fail
+        # This allows the health check endpoint to work and helps with debugging
 
 
 # Add a chat endpoint for the agent framework
@@ -974,24 +975,29 @@ async def backtest_error_handler(request: Request, exc: BacktestingError):
     return {"success": False, "error": str(exc), "error_type": "backtest_error"}
 
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Global exception handler."""
+    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "message": "Internal server error",
+            "error": str(exc) if settings.DEBUG else "An unexpected error occurred"
+        }
+    )
+
+
 # Run the application directly if this module is executed
 if __name__ == "__main__":
-    import uvicorn
-    import argparse
-    
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Run the Forex AI Trading System API server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind the server to")
-    parser.add_argument("--port", type=int, default=8000, help="Port to bind the server to")
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
-    args = parser.parse_args()
-    
-    # Configure logging level based on debug flag
-    if args.debug:
-        logging.basicConfig(level=logging.DEBUG)
-        logger.setLevel(logging.DEBUG)
-        logger.debug("Debug mode enabled")
-    
-    # Run the server
-    logger.info(f"Starting server on {args.host}:{args.port}")
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    port = int(os.getenv("PORT", "8000"))
+    host = "0.0.0.0"
+    uvicorn.run(
+        app,
+        host=host,
+        port=port,
+        workers=1,
+        log_level=settings.LOG_LEVEL.lower(),
+        timeout_keep_alive=5
+    )
