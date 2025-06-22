@@ -36,7 +36,7 @@ COPY . .
 
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir uvicorn fastapi gunicorn sse-starlette>=1.6.5
+    && pip install --no-cache-dir uvicorn fastapi gunicorn
 
 # Final stage
 FROM python:3.11-slim
@@ -68,6 +68,9 @@ RUN apt-get update \
         libpq5 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Install sse-starlette first
+RUN pip install --no-cache-dir sse-starlette>=1.6.5
 
 # Copy application code and dependencies
 COPY --from=builder /app /app
