@@ -34,7 +34,10 @@ RUN curl -L -o /tmp/ta-lib-0.4.0-src.tar.gz http://prdownloads.sourceforge.net/t
 # Copy requirements and install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir uvicorn fastapi gunicorn
+    && pip install --no-cache-dir uvicorn fastapi gunicorn sse-starlette>=1.6.5
+
+# Copy application code
+COPY . .
 
 # Final stage
 FROM python:3.11-slim
@@ -67,13 +70,9 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy Python packages and application code
+# Copy Python packages and application code from builder
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY . .
+COPY --from=builder /app /app
 
 # Create non-root user
 RUN adduser --disabled-password --gecos "" appuser \
