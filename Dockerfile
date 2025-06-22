@@ -31,12 +31,16 @@ RUN curl -L -o /tmp/ta-lib-0.4.0-src.tar.gz http://prdownloads.sourceforge.net/t
     && cd .. \
     && rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
 
-# Copy application code
-COPY . .
+# Install sse-starlette first
+RUN pip install --no-cache-dir sse-starlette>=1.6.5
 
-# Install dependencies
+# Copy requirements and install dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir uvicorn fastapi gunicorn
+
+# Copy application code
+COPY . .
 
 # Final stage
 FROM python:3.11-slim
