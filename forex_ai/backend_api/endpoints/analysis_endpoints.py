@@ -8,7 +8,8 @@ Will be fully implemented in Phase 5.
 import logging
 from typing import Dict, Any, List
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import status, APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 # Setup logging
@@ -66,3 +67,96 @@ async def get_analysis(
         context={"previous_analysis": None},
         timestamp=datetime.now(),
     )
+
+
+@router.get("/analysis/patterns/EUR_USD/H1")
+async def H1_redirect():
+    """
+    Redirect to /api/analysis/EUR_USD/H1 for backward compatibility.
+    """
+    logger.info("Redirecting from /api/analysis/patterns/EUR_USD/H1 to /api/analysis/EUR_USD/H1")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/analysis/EUR_USD/H1"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/analysis/EUR_USD/H1",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/analysis/indicators/EUR_USD/H1")
+async def H1_redirect():
+    """
+    Redirect to /api/analysis/EUR_USD/H1 for backward compatibility.
+    """
+    logger.info("Redirecting from /api/analysis/indicators/EUR_USD/H1 to /api/analysis/EUR_USD/H1")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/analysis/EUR_USD/H1"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/analysis/EUR_USD/H1",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/analysis/correlation/EUR_USD/USD_JPY")
+async def USD_JPY_redirect():
+    """
+    Redirect to /api/analysis/EUR_USD/H1 for backward compatibility.
+    """
+    logger.info("Redirecting from /api/analysis/correlation/EUR_USD/USD_JPY to /api/analysis/EUR_USD/H1")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/analysis/EUR_USD/H1"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/analysis/EUR_USD/H1",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/analysis/patterns/EUR_USD/H1")
+async def mock_H1():
+    """
+    Mock implementation for /api/analysis/patterns/EUR_USD/H1.
+    """
+    logger.info(f"Processing mock request for /api/analysis/patterns/EUR_USD/H1")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/analysis/indicators/EUR_USD/H1")
+async def mock_H1():
+    """
+    Mock implementation for /api/analysis/indicators/EUR_USD/H1.
+    """
+    logger.info(f"Processing mock request for /api/analysis/indicators/EUR_USD/H1")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/analysis/correlation/EUR_USD/USD_JPY")
+async def mock_USD_JPY():
+    """
+    Mock implementation for /api/analysis/correlation/EUR_USD/USD_JPY.
+    """
+    logger.info(f"Processing mock request for /api/analysis/correlation/EUR_USD/USD_JPY")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }

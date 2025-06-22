@@ -1,26 +1,51 @@
-# root conftest 
-import os
-import sys
+"""
+Pytest configuration for the Forex AI Trading System API tests.
+
+This file contains fixtures that are available to all tests.
+"""
+
 import pytest
-from unittest.mock import MagicMock, AsyncMock
+import asyncio
+from httpx import AsyncClient
+from fastapi import FastAPI
 
-def pytest_sessionstart(session):
-    """
-    Called after the Session object has been created and
-    before performing test collection and entering the run test loop.
-    """
-    # This path needs to be calculated manually because importing forex_ai.utils.logging
-    # here would trigger the same logging initialization problem.
-    project_root = os.path.dirname(os.path.abspath(__file__))
-    sys.path.insert(0, os.path.abspath(os.path.join(project_root, '..')))
-    logs_dir = os.path.join(project_root, '..', 'forex_ai', 'logs')
-    os.makedirs(logs_dir, exist_ok=True)
+from forex_ai.api.main import app
+from forex_ai.config.settings import get_settings
 
-def pytest_configure(config):
-    """
-    Allows plugins and conftest files to perform initial configuration.
-    This hook is called for every plugin and initial conftest file
-    after command line options have been parsed.
-    """
-    if not os.path.exists("logs"):
-        os.makedirs("logs") 
+
+@pytest.fixture
+def event_loop():
+    """Create an instance of the default event loop for each test case."""
+    loop = asyncio.get_event_loop_policy().new_event_loop()
+    yield loop
+    loop.close()
+
+
+@pytest.fixture
+async def client():
+    """Create a test client for the FastAPI application."""
+    settings = get_settings()
+    settings.TESTING = True
+    
+    async with AsyncClient(app=app, base_url="http://test") as client:
+        yield client
+
+
+@pytest.fixture
+def test_app():
+    """Return the FastAPI application for testing."""
+    settings = get_settings()
+    settings.TESTING = True
+    return app
+
+
+@pytest.fixture
+def mock_token():
+    """Return a mock JWT token for testing."""
+    return "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ0ZXN0QGV4YW1wbGUuY29tIiwiZXhwIjoxNzE5MDg4MzA3LCJpYXQiOjE3MTkwMDE5MDcsInJvbGUiOiJ0ZXN0X3VzZXIifQ.YlWbvHmQnK9uYEJRYNw7kLTjx9Ld0JMFpxkXXLRQ1TY"
+
+
+@pytest.fixture
+def mock_headers(mock_token):
+    """Return mock headers with authorization token for testing."""
+    return {"Authorization": f"Bearer {mock_token}"}

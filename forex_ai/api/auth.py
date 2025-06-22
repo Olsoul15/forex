@@ -3,6 +3,8 @@ Authentication API routes for the Forex AI Trading System.
 """
 
 import logging
+import time
+import jwt
 from typing import Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -14,6 +16,7 @@ from forex_ai.auth.supabase import (
     AuthResponse,
     get_current_user,
 )
+from forex_ai.config.settings import get_settings
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -50,6 +53,48 @@ async def login(credentials: UserCredentials) -> AuthResponse:
     """
     logger.info(f"Login attempt for user: {credentials.email}")
     return await auth_service.login(credentials)
+
+
+@router.post("/mock-login", response_model=AuthResponse)
+async def mock_login(credentials: UserCredentials) -> AuthResponse:
+    """
+    Mock login endpoint for testing purposes.
+    
+    This endpoint always succeeds and returns a hardcoded JWT token.
+
+    Args:
+        credentials: User credentials
+
+    Returns:
+        AuthResponse: Authentication response with mock access token
+    """
+    logger.info(f"Mock login for testing with email: {credentials.email}")
+    
+    # Create a mock JWT token that expires in 24 hours
+    settings = get_settings()
+    secret_key = settings.SECRET_KEY
+    expiration = int(time.time()) + 86400  # 24 hours
+    
+    payload = {
+        "sub": credentials.email,
+        "exp": expiration,
+        "iat": int(time.time()),
+        "role": "test_user"
+    }
+    
+    # Generate token
+    token = jwt.encode(payload, secret_key, algorithm=settings.ALGORITHM)
+    
+    # Create response
+    return AuthResponse(
+        access_token=token,
+        user={
+            "id": "test-user-id",
+            "email": credentials.email,
+            "role": "test_user",
+            "created_at": "2025-01-01T00:00:00Z"
+        }
+    )
 
 
 @router.post("/logout")

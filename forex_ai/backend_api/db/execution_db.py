@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 
-from app.models.account_models import (
+from forex_ai.models.account_models import (
     OrderType,
     OrderDirection,
     OrderStatus,
@@ -21,7 +21,7 @@ from app.models.account_models import (
     Trade,
     Transaction,
 )
-from app.models.execution_models import (
+from forex_ai.models.execution_models import (
     ExecutionMode,
     PositionSizeType,
     TimeInForce,
@@ -32,7 +32,9 @@ from app.models.execution_models import (
     PositionSizeCalculation,
     OrderTriggerType,
 )
-from app.db import account_db
+from forex_ai.backend_api.db import account_db
+from forex_ai.data.storage.supabase_client import SupabaseClient
+from forex_ai.exceptions import DatabaseError
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -54,6 +56,8 @@ exchange_rates = {
     "EUR_GBP": 0.8550,
 }
 
+# Initialize Supabase client
+supabase_client = SupabaseClient()
 
 # Initialize with default preferences
 def initialize_preferences():
@@ -1162,6 +1166,598 @@ def process_order_triggers():
                 f"Trigger {trigger_id} activated and {'succeeded' if result.success else 'failed'}"
             )
 
+
+def get_auto_trading_preferences(user_id: str) -> Dict[str, Any]:
+    """
+    Get auto-trading preferences for a user.
+
+    Args:
+        user_id: User ID
+
+    Returns:
+        Dictionary containing auto-trading preferences
+    """
+    try:
+        logger.info(f"Getting auto-trading preferences for user {user_id}")
+        
+        # Query the database
+        result = supabase_client.client.table("auto_trading_preferences") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .execute()
+        
+        if not result.data:
+            logger.info(f"No auto-trading preferences found for user {user_id}")
+            return {}
+        
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Error getting auto-trading preferences: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error getting auto-trading preferences: {str(e)}")
+
+def update_auto_trading_preferences(user_id: str, preferences: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Update auto-trading preferences for a user.
+
+    Args:
+        user_id: User ID
+        preferences: Dictionary containing auto-trading preferences
+
+    Returns:
+        Updated preferences
+    """
+    try:
+        logger.info(f"Updating auto-trading preferences for user {user_id}")
+        
+        # Check if preferences exist
+        existing = get_auto_trading_preferences(user_id)
+        
+        # Prepare data
+        data = {
+            "user_id": user_id,
+            **preferences,
+            "updated_at": datetime.now().isoformat(),
+        }
+        
+        if existing:
+            # Update existing preferences
+            result = supabase_client.client.table("auto_trading_preferences") \
+                .update(data) \
+                .eq("user_id", user_id) \
+                .execute()
+        else:
+            # Insert new preferences
+            data["created_at"] = datetime.now().isoformat()
+            result = supabase_client.client.table("auto_trading_preferences") \
+                .insert(data) \
+                .execute()
+        
+        if not result.data:
+            logger.error(f"Failed to update auto-trading preferences for user {user_id}")
+            raise DatabaseError(f"Failed to update auto-trading preferences for user {user_id}")
+        
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Error updating auto-trading preferences: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error updating auto-trading preferences: {str(e)}")
+
+def set_auto_trading_status(user_id: str, account_id: str, enabled: bool) -> bool:
+    """
+    Set auto-trading status for a user and account.
+
+    Args:
+        user_id: User ID
+        account_id: Account ID
+        enabled: Whether auto-trading is enabled
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        logger.info(f"Setting auto-trading status for user {user_id}, account {account_id} to {enabled}")
+        
+        # Prepare data
+        data = {
+            "user_id": user_id,
+            "account_id": account_id,
+            "enabled": enabled,
+            "updated_at": datetime.now().isoformat(),
+        }
+        
+        # Check if record exists
+        result = supabase_client.client.table("auto_trading_status") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .eq("account_id", account_id) \
+            .execute()
+        
+        if result.data:
+            # Update existing record
+            result = supabase_client.client.table("auto_trading_status") \
+                .update(data) \
+                .eq("user_id", user_id) \
+                .eq("account_id", account_id) \
+                .execute()
+        else:
+            # Insert new record
+            data["created_at"] = datetime.now().isoformat()
+            result = supabase_client.client.table("auto_trading_status") \
+                .insert(data) \
+                .execute()
+        
+        return bool(result.data)
+    except Exception as e:
+        logger.error(f"Error setting auto-trading status: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error setting auto-trading status: {str(e)}")
+
+def get_auto_trading_stats(
+    user_id: str, 
+    account_id: Optional[str] = None, 
+    period: str = "1m"
+) -> Dict[str, Any]:
+    """
+    Get auto-trading stats for a user and account.
+
+    Args:
+        user_id: User ID
+        account_id: Account ID (optional)
+        period: Time period (1d, 1w, 1m, 3m, 6m, 1y, all)
+
+    Returns:
+        Dictionary containing auto-trading stats
+    """
+    try:
+        logger.info(f"Getting auto-trading stats for user {user_id}, account {account_id}, period {period}")
+        
+        # Calculate date range
+        now = datetime.now()
+        if period == "1d":
+            start_date = now - timedelta(days=1)
+        elif period == "1w":
+            start_date = now - timedelta(weeks=1)
+        elif period == "1m":
+            start_date = now - timedelta(days=30)
+        elif period == "3m":
+            start_date = now - timedelta(days=90)
+        elif period == "6m":
+            start_date = now - timedelta(days=180)
+        elif period == "1y":
+            start_date = now - timedelta(days=365)
+        else:
+            # Default to all available data
+            start_date = datetime(2000, 1, 1)
+        
+        # Build query
+        query = supabase_client.client.table("auto_trading_trades") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .gte("entry_time", start_date.isoformat())
+        
+        # Add account filter if provided
+        if account_id:
+            query = query.eq("account_id", account_id)
+        
+        # Execute query
+        result = query.execute()
+        
+        if not result.data:
+            logger.info(f"No auto-trading trades found for user {user_id}")
+            return {}
+        
+        # Calculate stats
+        trades = result.data
+        total_trades = len(trades)
+        successful_trades = len([t for t in trades if t.get("profit_loss", 0) > 0])
+        failed_trades = total_trades - successful_trades
+        win_rate = (successful_trades / total_trades) * 100 if total_trades > 0 else 0
+        profit_loss = sum(t.get("profit_loss", 0) for t in trades)
+        
+        # Calculate daily stats
+        daily_stats = {}
+        for trade in trades:
+            entry_date = trade.get("entry_time", "").split("T")[0]
+            if entry_date not in daily_stats:
+                daily_stats[entry_date] = {
+                    "trades": 0,
+                    "profit_loss": 0,
+                    "successful_trades": 0,
+                    "failed_trades": 0,
+                }
+            
+            daily_stats[entry_date]["trades"] += 1
+            daily_stats[entry_date]["profit_loss"] += trade.get("profit_loss", 0)
+            
+            if trade.get("profit_loss", 0) > 0:
+                daily_stats[entry_date]["successful_trades"] += 1
+            else:
+                daily_stats[entry_date]["failed_trades"] += 1
+        
+        return {
+            "total_trades": total_trades,
+            "successful_trades": successful_trades,
+            "failed_trades": failed_trades,
+            "win_rate": win_rate,
+            "profit_loss": profit_loss,
+            "daily_stats": daily_stats,
+        }
+    except Exception as e:
+        logger.error(f"Error getting auto-trading stats: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error getting auto-trading stats: {str(e)}")
+
+def get_auto_trading_trades(
+    user_id: str, 
+    account_id: Optional[str] = None, 
+    limit: int = 10
+) -> List[Dict[str, Any]]:
+    """
+    Get auto-trading trades for a user and account.
+
+    Args:
+        user_id: User ID
+        account_id: Account ID (optional)
+        limit: Maximum number of trades to return
+
+    Returns:
+        List of trades
+    """
+    try:
+        logger.info(f"Getting auto-trading trades for user {user_id}, account {account_id}, limit {limit}")
+        
+        # Build query
+        query = supabase_client.client.table("auto_trading_trades") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .order("entry_time", desc=True) \
+            .limit(limit)
+        
+        # Add account filter if provided
+        if account_id:
+            query = query.eq("account_id", account_id)
+        
+        # Execute query
+        result = query.execute()
+        
+        if not result.data:
+            logger.info(f"No auto-trading trades found for user {user_id}")
+            return []
+        
+        return result.data
+    except Exception as e:
+        logger.error(f"Error getting auto-trading trades: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error getting auto-trading trades: {str(e)}")
+
+def get_signals(
+    user_id: str,
+    strategy_id: Optional[str] = None,
+    instrument: Optional[str] = None,
+    timeframe: Optional[str] = None,
+    status: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    """
+    Get trading signals for a user.
+
+    Args:
+        user_id: User ID
+        strategy_id: Filter by strategy ID (optional)
+        instrument: Filter by instrument (optional)
+        timeframe: Filter by timeframe (optional)
+        status: Filter by status (optional)
+        start_date: Start date for filtering (optional)
+        end_date: End date for filtering (optional)
+        limit: Maximum number of signals to return
+        offset: Offset for pagination
+
+    Returns:
+        List of signals
+    """
+    try:
+        logger.info(f"Getting signals for user {user_id}")
+        
+        # Build query
+        query = supabase_client.client.table("trading_signals") \
+            .select("*") \
+            .eq("user_id", user_id) \
+            .order("signal_time", desc=True) \
+            .limit(limit) \
+            .offset(offset)
+        
+        # Add filters
+        if strategy_id:
+            query = query.eq("strategy_id", strategy_id)
+        
+        if instrument:
+            query = query.eq("instrument", instrument)
+        
+        if timeframe:
+            query = query.eq("timeframe", timeframe)
+        
+        if status:
+            query = query.eq("status", status)
+        
+        if start_date:
+            query = query.gte("signal_time", start_date.isoformat())
+        
+        if end_date:
+            query = query.lte("signal_time", end_date.isoformat())
+        
+        # Execute query
+        result = query.execute()
+        
+        if not result.data:
+            logger.info(f"No signals found for user {user_id}")
+            return []
+        
+        return result.data
+    except Exception as e:
+        logger.error(f"Error getting signals: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error getting signals: {str(e)}")
+
+def get_signal_count(
+    user_id: str,
+    strategy_id: Optional[str] = None,
+    instrument: Optional[str] = None,
+    timeframe: Optional[str] = None,
+    status: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> int:
+    """
+    Get count of trading signals for a user.
+
+    Args:
+        user_id: User ID
+        strategy_id: Filter by strategy ID (optional)
+        instrument: Filter by instrument (optional)
+        timeframe: Filter by timeframe (optional)
+        status: Filter by status (optional)
+        start_date: Start date for filtering (optional)
+        end_date: End date for filtering (optional)
+
+    Returns:
+        Count of signals
+    """
+    try:
+        logger.info(f"Getting signal count for user {user_id}")
+        
+        # Build query
+        query = supabase_client.client.table("trading_signals") \
+            .select("id", count="exact") \
+            .eq("user_id", user_id)
+        
+        # Add filters
+        if strategy_id:
+            query = query.eq("strategy_id", strategy_id)
+        
+        if instrument:
+            query = query.eq("instrument", instrument)
+        
+        if timeframe:
+            query = query.eq("timeframe", timeframe)
+        
+        if status:
+            query = query.eq("status", status)
+        
+        if start_date:
+            query = query.gte("signal_time", start_date.isoformat())
+        
+        if end_date:
+            query = query.lte("signal_time", end_date.isoformat())
+        
+        # Execute query
+        result = query.execute()
+        
+        return result.count or 0
+    except Exception as e:
+        logger.error(f"Error getting signal count: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error getting signal count: {str(e)}")
+
+def get_signal_by_id(signal_id: str) -> Dict[str, Any]:
+    """
+    Get a signal by ID.
+
+    Args:
+        signal_id: Signal ID
+
+    Returns:
+        Signal data
+    """
+    try:
+        logger.info(f"Getting signal {signal_id}")
+        
+        # Query the database
+        result = supabase_client.client.table("trading_signals") \
+            .select("*") \
+            .eq("id", signal_id) \
+            .execute()
+        
+        if not result.data:
+            logger.info(f"Signal {signal_id} not found")
+            return {}
+        
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Error getting signal: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error getting signal: {str(e)}")
+
+def get_signal_performance(
+    user_id: str,
+    strategy_id: Optional[str] = None,
+    instrument: Optional[str] = None,
+    timeframe: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    """
+    Get performance metrics for signals.
+
+    Args:
+        user_id: User ID
+        strategy_id: Filter by strategy ID (optional)
+        instrument: Filter by instrument (optional)
+        timeframe: Filter by timeframe (optional)
+        start_date: Start date for filtering (optional)
+        end_date: End date for filtering (optional)
+
+    Returns:
+        Dictionary containing performance metrics
+    """
+    try:
+        logger.info(f"Getting signal performance for user {user_id}")
+        
+        # Get signals
+        signals = get_signals(
+            user_id=user_id,
+            strategy_id=strategy_id,
+            instrument=instrument,
+            timeframe=timeframe,
+            status="closed",
+            start_date=start_date,
+            end_date=end_date,
+            limit=1000,  # Get a large number of signals for accurate metrics
+            offset=0,
+        )
+        
+        if not signals:
+            logger.info(f"No closed signals found for user {user_id}")
+            return {}
+        
+        # Calculate metrics
+        total_signals = len(signals)
+        executed_signals = len([s for s in signals if s.get("executed", False)])
+        profitable_signals = len([s for s in signals if s.get("profit_loss", 0) > 0])
+        losing_signals = executed_signals - profitable_signals
+        
+        win_rate = (profitable_signals / executed_signals) * 100 if executed_signals > 0 else 0
+        
+        # Calculate profit factor
+        gross_profit = sum(s.get("profit_loss", 0) for s in signals if s.get("profit_loss", 0) > 0)
+        gross_loss = abs(sum(s.get("profit_loss", 0) for s in signals if s.get("profit_loss", 0) < 0))
+        profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0
+        
+        # Calculate average win/loss
+        average_win = gross_profit / profitable_signals if profitable_signals > 0 else 0
+        average_loss = gross_loss / losing_signals if losing_signals > 0 else 0
+        
+        # Calculate largest win/loss
+        largest_win = max((s.get("profit_loss", 0) for s in signals if s.get("profit_loss", 0) > 0), default=0)
+        largest_loss = min((s.get("profit_loss", 0) for s in signals if s.get("profit_loss", 0) < 0), default=0)
+        
+        # Calculate average holding time
+        holding_times = []
+        for signal in signals:
+            if signal.get("executed", False) and signal.get("closed", False):
+                execution_time = datetime.fromisoformat(signal.get("execution_time").replace("Z", "+00:00"))
+                close_time = datetime.fromisoformat(signal.get("close_time").replace("Z", "+00:00"))
+                holding_time = (close_time - execution_time).total_seconds() / 3600  # in hours
+                holding_times.append(holding_time)
+        
+        average_holding_time = sum(holding_times) / len(holding_times) if holding_times else 0
+        
+        return {
+            "win_rate": win_rate,
+            "profit_factor": profit_factor,
+            "average_win": average_win,
+            "average_loss": average_loss,
+            "largest_win": largest_win,
+            "largest_loss": largest_loss,
+            "average_holding_time": average_holding_time,
+            "total_signals": total_signals,
+            "executed_signals": executed_signals,
+            "profitable_signals": profitable_signals,
+            "losing_signals": losing_signals,
+        }
+    except Exception as e:
+        logger.error(f"Error getting signal performance: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error getting signal performance: {str(e)}")
+
+def execute_signal(
+    signal_id: str,
+    account_id: str,
+    size: float,
+    stop_loss: Optional[float] = None,
+    take_profit: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Execute a trading signal.
+
+    Args:
+        signal_id: Signal ID
+        account_id: Account ID to execute the signal on
+        size: Position size to execute
+        stop_loss: Stop loss price (overrides signal stop loss)
+        take_profit: Take profit price (overrides signal take profit)
+
+    Returns:
+        Dictionary containing execution result
+    """
+    try:
+        logger.info(f"Executing signal {signal_id} on account {account_id}")
+        
+        # Get signal
+        signal = get_signal_by_id(signal_id)
+        
+        if not signal:
+            logger.error(f"Signal {signal_id} not found")
+            return {"success": False, "message": f"Signal {signal_id} not found"}
+        
+        # Check if signal is valid for execution
+        if signal.get("status") not in ["active", "pending"]:
+            logger.error(f"Signal {signal_id} is not valid for execution (status: {signal.get('status')})")
+            return {"success": False, "message": f"Signal is not valid for execution (status: {signal.get('status')})"}
+        
+        # Check if signal is expired
+        if signal.get("expiration_time") and datetime.fromisoformat(signal.get("expiration_time").replace("Z", "+00:00")) < datetime.now():
+            logger.error(f"Signal {signal_id} has expired")
+            return {"success": False, "message": "Signal has expired"}
+        
+        # Check if signal is already executed
+        if signal.get("executed", False):
+            logger.error(f"Signal {signal_id} has already been executed")
+            return {"success": False, "message": "Signal has already been executed"}
+        
+        # TODO: Implement actual execution logic with broker API
+        # For now, simulate execution
+        order_id = str(uuid.uuid4())
+        
+        # Update signal
+        update_data = {
+            "executed": True,
+            "execution_time": datetime.now().isoformat(),
+            "execution_price": signal.get("entry_price"),
+            "status": "open",
+            "account_id": account_id,
+            "size": size,
+        }
+        
+        # Override stop loss and take profit if provided
+        if stop_loss is not None:
+            update_data["stop_loss"] = stop_loss
+        
+        if take_profit is not None:
+            update_data["take_profit"] = take_profit
+        
+        # Update signal in database
+        result = supabase_client.client.table("trading_signals") \
+            .update(update_data) \
+            .eq("id", signal_id) \
+            .execute()
+        
+        if not result.data:
+            logger.error(f"Failed to update signal {signal_id}")
+            return {"success": False, "message": "Failed to update signal"}
+        
+        return {
+            "success": True,
+            "message": "Signal executed successfully",
+            "order_id": order_id,
+        }
+    except Exception as e:
+        logger.error(f"Error executing signal: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error executing signal: {str(e)}")
 
 # Initialize
 initialize_preferences()

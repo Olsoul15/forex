@@ -7,10 +7,10 @@ This module provides functionality to interact with strategy data storage.
 import logging
 import json
 import uuid
-from typing import List, Dict, Any, Optional
-from datetime import datetime
+from typing import List, Dict, Any, Optional, Union
+from datetime import datetime, timedelta
 
-from app.models.strategy_models import (
+from forex_ai.models.strategy_models import (
     Strategy,
     StrategyBase,
     StrategyCreate,
@@ -20,12 +20,17 @@ from app.models.strategy_models import (
     RiskProfile,
     ParameterType,
 )
+from forex_ai.data.storage.supabase_client import SupabaseClient
+from forex_ai.exceptions import DatabaseError
 
 # Setup logging
 logger = logging.getLogger(__name__)
 
 # In-memory database for strategies (replace with real database in production)
 strategies_db = {}
+
+# Initialize Supabase client
+supabase_client = SupabaseClient()
 
 
 # Sample strategies for testing
@@ -271,3 +276,455 @@ def get_strategies_for_timeframe(timeframe: TimeFrame) -> List[Strategy]:
     logger.info(f"Retrieving strategies for timeframe: {timeframe}")
 
     return [s for s in strategies_db.values() if timeframe in s.timeframes]
+
+
+def user_has_strategy_access(user_id: str, strategy_id: str) -> bool:
+    """
+    Check if a user has access to a strategy.
+
+    Args:
+        user_id: User ID
+        strategy_id: Strategy ID
+
+    Returns:
+        True if user has access, False otherwise
+    """
+    try:
+        logger.info(f"Checking if user {user_id} has access to strategy {strategy_id}")
+        
+        # Query the database
+        result = supabase_client.client.table("strategies") \
+            .select("id") \
+            .eq("id", strategy_id) \
+            .eq("user_id", user_id) \
+            .execute()
+        
+        return bool(result.data)
+    except Exception as e:
+        logger.error(f"Error checking strategy access: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error checking strategy access: {str(e)}")
+
+
+def start_optimization_job(
+    user_id: str,
+    strategy_id: str,
+    instrument: str,
+    timeframe: str,
+    start_date: datetime,
+    end_date: datetime,
+    parameters: List[Dict[str, Any]],
+    optimization_metric: str = "profit_factor",
+    population_size: int = 50,
+    generations: int = 10,
+    parallel_jobs: int = 4,
+) -> Dict[str, Any]:
+    """
+    Start a strategy optimization job.
+
+    Args:
+        user_id: User ID
+        strategy_id: Strategy ID to optimize
+        instrument: Instrument to optimize for
+        timeframe: Timeframe to optimize for
+        start_date: Start date for optimization
+        end_date: End date for optimization
+        parameters: Parameters to optimize
+        optimization_metric: Metric to optimize for
+        population_size: Population size for genetic algorithm
+        generations: Number of generations for genetic algorithm
+        parallel_jobs: Number of parallel jobs to run
+
+    Returns:
+        Dictionary containing job information
+    """
+    try:
+        logger.info(f"Starting optimization job for strategy {strategy_id}")
+        
+        # Create job ID
+        job_id = str(uuid.uuid4())
+        
+        # Prepare job data
+        job_data = {
+            "id": job_id,
+            "user_id": user_id,
+            "strategy_id": strategy_id,
+            "instrument": instrument,
+            "timeframe": timeframe,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "parameters": parameters,
+            "optimization_metric": optimization_metric,
+            "population_size": population_size,
+            "generations": generations,
+            "parallel_jobs": parallel_jobs,
+            "status": "pending",
+            "progress": 0.0,
+            "message": "Job created",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+        }
+        
+        # Insert job into database
+        result = supabase_client.client.table("optimization_jobs") \
+            .insert(job_data) \
+            .execute()
+        
+        if not result.data:
+            logger.error(f"Failed to create optimization job for strategy {strategy_id}")
+            raise DatabaseError(f"Failed to create optimization job for strategy {strategy_id}")
+        
+        # TODO: Start actual optimization process (e.g., using a background task)
+        # For now, simulate job start
+        
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Error starting optimization job: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error starting optimization job: {str(e)}")
+
+
+def get_optimization_job(job_id: str) -> Dict[str, Any]:
+    """
+    Get optimization job information.
+
+    Args:
+        job_id: Job ID
+
+    Returns:
+        Dictionary containing job information
+    """
+    try:
+        logger.info(f"Getting optimization job {job_id}")
+        
+        # Query the database
+        result = supabase_client.client.table("optimization_jobs") \
+            .select("*") \
+            .eq("id", job_id) \
+            .execute()
+        
+        if not result.data:
+            logger.info(f"Optimization job {job_id} not found")
+            return {}
+        
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Error getting optimization job: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error getting optimization job: {str(e)}")
+
+
+def get_optimization_results(job_id: str) -> Dict[str, Any]:
+    """
+    Get optimization job results.
+
+    Args:
+        job_id: Job ID
+
+    Returns:
+        Dictionary containing job results
+    """
+    try:
+        logger.info(f"Getting optimization results for job {job_id}")
+        
+        # Query the database
+        result = supabase_client.client.table("optimization_results") \
+            .select("*") \
+            .eq("job_id", job_id) \
+            .execute()
+        
+        if not result.data:
+            logger.info(f"No optimization results found for job {job_id}")
+            return {}
+        
+        # Get job information
+        job = get_optimization_job(job_id)
+        
+        # Combine job info with results
+        return {
+            "job_id": job_id,
+            "strategy_id": job.get("strategy_id"),
+            "instrument": job.get("instrument"),
+            "timeframe": job.get("timeframe"),
+            "start_date": job.get("start_date"),
+            "end_date": job.get("end_date"),
+            "optimization_metric": job.get("optimization_metric"),
+            "results": result.data,
+        }
+    except Exception as e:
+        logger.error(f"Error getting optimization results: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error getting optimization results: {str(e)}")
+
+
+def start_walkforward_test(
+    user_id: str,
+    strategy_id: str,
+    instrument: str,
+    timeframe: str,
+    start_date: datetime,
+    end_date: datetime,
+    parameters: Dict[str, Union[float, int]],
+    window_size: int = 90,
+    step_size: int = 30,
+) -> Dict[str, Any]:
+    """
+    Start a walkforward test.
+
+    Args:
+        user_id: User ID
+        strategy_id: Strategy ID to test
+        instrument: Instrument to test on
+        timeframe: Timeframe to test on
+        start_date: Start date for testing
+        end_date: End date for testing
+        parameters: Strategy parameters
+        window_size: Window size in days
+        step_size: Step size in days
+
+    Returns:
+        Dictionary containing job information
+    """
+    try:
+        logger.info(f"Starting walkforward test for strategy {strategy_id}")
+        
+        # Create job ID
+        job_id = str(uuid.uuid4())
+        
+        # Prepare job data
+        job_data = {
+            "id": job_id,
+            "user_id": user_id,
+            "strategy_id": strategy_id,
+            "instrument": instrument,
+            "timeframe": timeframe,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "parameters": parameters,
+            "window_size": window_size,
+            "step_size": step_size,
+            "status": "pending",
+            "progress": 0.0,
+            "message": "Job created",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+        }
+        
+        # Insert job into database
+        result = supabase_client.client.table("walkforward_jobs") \
+            .insert(job_data) \
+            .execute()
+        
+        if not result.data:
+            logger.error(f"Failed to create walkforward test job for strategy {strategy_id}")
+            raise DatabaseError(f"Failed to create walkforward test job for strategy {strategy_id}")
+        
+        # TODO: Start actual walkforward test process (e.g., using a background task)
+        # For now, simulate job start
+        
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Error starting walkforward test: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error starting walkforward test: {str(e)}")
+
+
+def get_walkforward_job(job_id: str) -> Dict[str, Any]:
+    """
+    Get walkforward test job information.
+
+    Args:
+        job_id: Job ID
+
+    Returns:
+        Dictionary containing job information
+    """
+    try:
+        logger.info(f"Getting walkforward test job {job_id}")
+        
+        # Query the database
+        result = supabase_client.client.table("walkforward_jobs") \
+            .select("*") \
+            .eq("id", job_id) \
+            .execute()
+        
+        if not result.data:
+            logger.info(f"Walkforward test job {job_id} not found")
+            return {}
+        
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Error getting walkforward test job: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error getting walkforward test job: {str(e)}")
+
+
+def get_walkforward_results(job_id: str) -> Dict[str, Any]:
+    """
+    Get walkforward test job results.
+
+    Args:
+        job_id: Job ID
+
+    Returns:
+        Dictionary containing job results
+    """
+    try:
+        logger.info(f"Getting walkforward test results for job {job_id}")
+        
+        # Query the database
+        result = supabase_client.client.table("walkforward_results") \
+            .select("*") \
+            .eq("job_id", job_id) \
+            .execute()
+        
+        if not result.data:
+            logger.info(f"No walkforward test results found for job {job_id}")
+            return {}
+        
+        # Calculate overall metrics
+        results = result.data
+        overall_profit_factor = sum(r.get("profit_factor", 0) for r in results) / len(results)
+        overall_sharpe_ratio = sum(r.get("sharpe_ratio", 0) for r in results) / len(results)
+        overall_win_rate = sum(r.get("win_rate", 0) for r in results) / len(results)
+        overall_total_trades = sum(r.get("total_trades", 0) for r in results)
+        overall_net_profit = sum(r.get("net_profit", 0) for r in results)
+        overall_max_drawdown = max(r.get("max_drawdown", 0) for r in results)
+        
+        return {
+            "results": results,
+            "overall_profit_factor": overall_profit_factor,
+            "overall_sharpe_ratio": overall_sharpe_ratio,
+            "overall_win_rate": overall_win_rate,
+            "overall_total_trades": overall_total_trades,
+            "overall_net_profit": overall_net_profit,
+            "overall_max_drawdown": overall_max_drawdown,
+        }
+    except Exception as e:
+        logger.error(f"Error getting walkforward test results: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error getting walkforward test results: {str(e)}")
+
+
+def start_montecarlo_simulation(
+    user_id: str,
+    strategy_id: str,
+    instrument: str,
+    timeframe: str,
+    start_date: datetime,
+    end_date: datetime,
+    parameters: Dict[str, Union[float, int]],
+    simulations: int = 1000,
+    confidence_level: float = 0.95,
+) -> Dict[str, Any]:
+    """
+    Start a Monte Carlo simulation.
+
+    Args:
+        user_id: User ID
+        strategy_id: Strategy ID to simulate
+        instrument: Instrument to simulate on
+        timeframe: Timeframe to simulate on
+        start_date: Start date for simulation
+        end_date: End date for simulation
+        parameters: Strategy parameters
+        simulations: Number of simulations to run
+        confidence_level: Confidence level for results
+
+    Returns:
+        Dictionary containing job information
+    """
+    try:
+        logger.info(f"Starting Monte Carlo simulation for strategy {strategy_id}")
+        
+        # Create job ID
+        job_id = str(uuid.uuid4())
+        
+        # Prepare job data
+        job_data = {
+            "id": job_id,
+            "user_id": user_id,
+            "strategy_id": strategy_id,
+            "instrument": instrument,
+            "timeframe": timeframe,
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "parameters": parameters,
+            "simulations": simulations,
+            "confidence_level": confidence_level,
+            "status": "pending",
+            "progress": 0.0,
+            "message": "Job created",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+        }
+        
+        # Insert job into database
+        result = supabase_client.client.table("montecarlo_jobs") \
+            .insert(job_data) \
+            .execute()
+        
+        if not result.data:
+            logger.error(f"Failed to create Monte Carlo simulation job for strategy {strategy_id}")
+            raise DatabaseError(f"Failed to create Monte Carlo simulation job for strategy {strategy_id}")
+        
+        # TODO: Start actual Monte Carlo simulation process (e.g., using a background task)
+        # For now, simulate job start
+        
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Error starting Monte Carlo simulation: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error starting Monte Carlo simulation: {str(e)}")
+
+
+def get_montecarlo_job(job_id: str) -> Dict[str, Any]:
+    """
+    Get Monte Carlo simulation job information.
+
+    Args:
+        job_id: Job ID
+
+    Returns:
+        Dictionary containing job information
+    """
+    try:
+        logger.info(f"Getting Monte Carlo simulation job {job_id}")
+        
+        # Query the database
+        result = supabase_client.client.table("montecarlo_jobs") \
+            .select("*") \
+            .eq("id", job_id) \
+            .execute()
+        
+        if not result.data:
+            logger.info(f"Monte Carlo simulation job {job_id} not found")
+            return {}
+        
+        return result.data[0]
+    except Exception as e:
+        logger.error(f"Error getting Monte Carlo simulation job: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error getting Monte Carlo simulation job: {str(e)}")
+
+
+def get_montecarlo_results(job_id: str) -> Dict[str, Any]:
+    """
+    Get Monte Carlo simulation job results.
+
+    Args:
+        job_id: Job ID
+
+    Returns:
+        Dictionary containing job results
+    """
+    try:
+        logger.info(f"Getting Monte Carlo simulation results for job {job_id}")
+        
+        # Query the database
+        result = supabase_client.client.table("montecarlo_results") \
+            .select("*") \
+            .eq("job_id", job_id) \
+            .execute()
+        
+        if not result.data:
+            logger.info(f"No Monte Carlo simulation results found for job {job_id}")
+            return {}
+        
+        return {
+            "results": result.data,
+        }
+    except Exception as e:
+        logger.error(f"Error getting Monte Carlo simulation results: {str(e)}", exc_info=True)
+        raise DatabaseError(f"Error getting Monte Carlo simulation results: {str(e)}")

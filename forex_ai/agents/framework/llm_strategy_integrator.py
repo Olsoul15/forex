@@ -16,7 +16,9 @@ from pydantic import BaseModel, Field
 from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate
 from langchain.output_parsers import PydanticOutputParser
-from langchain.chat_models import ChatOpenAI
+
+# Google Vertex AI dependencies
+from langchain_google_vertexai import VertexAI
 
 # Forex AI dependencies
 from forex_ai.custom_types import (
@@ -26,6 +28,7 @@ from forex_ai.custom_types import (
     PineScriptStrategy,
 )
 from forex_ai.exceptions import StrategyError, ValidationError
+from forex_ai.models.llm_controller import LLMController
 
 logger = logging.getLogger(__name__)
 
@@ -95,8 +98,9 @@ class LLMStrategyIntegrator:
             config: Configuration dictionary
         """
         self.config = config
-        self.llm_provider = config.get("llm_provider", "openai")
-        self.model_name = config.get("model_name", "gpt-4")
+        self.llm_provider = config.get("provider", "vertex")
+        self.model_name = config.get("model_name", "gemini-1.5-pro")
+        self.temperature = config.get("temperature", 0.2)
 
         # Initialize LLM
         self._initialize_llm()
@@ -107,177 +111,168 @@ class LLMStrategyIntegrator:
 
     def _initialize_llm(self):
         """Initialize the LLM based on configuration"""
-        if self.llm_provider == "azure":
-            # Use Azure OpenAI credentials from environment
-            from langchain.chat_models import AzureChatOpenAI
-
-            self.llm = AzureChatOpenAI(
-                deployment_name=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),
-                openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION"),
-                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-                temperature=self.config.get("temperature", 0.2),
-            )
-            logger.info(
-                f"Initialized Azure OpenAI with deployment: {os.getenv('AZURE_OPENAI_DEPLOYMENT_NAME')}"
-            )
-        elif self.llm_provider == "openai":
-            self.llm = ChatOpenAI(
+        try:
+            # Use Google Vertex AI
+            self.llm = VertexAI(
                 model_name=self.model_name,
-                temperature=self.config.get("temperature", 0.2),
-                api_key=os.getenv("OPENAI_API_KEY"),
+                temperature=self.temperature,
+                project=os.getenv("GCP_PROJECT_ID"),
+                location=os.getenv("GCP_LOCATION", "us-central1"),
+                max_output_tokens=4000,
             )
-            logger.info(f"Initialized OpenAI with model: {self.model_name}")
-        elif self.llm_provider == "anthropic":
-            from langchain.chat_models import ChatAnthropic
-
-            self.llm = ChatAnthropic(
-                model=self.model_name,
-                temperature=self.config.get("temperature", 0.2),
-                api_key=os.getenv("ANTHROPIC_API_KEY"),
-            )
-            logger.info(f"Initialized Anthropic with model: {self.model_name}")
-        else:
-            raise ValueError(f"Unsupported LLM provider: {self.llm_provider}")
+            logger.info(f"Initialized Google Vertex AI with model: {self.model_name}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Google Vertex AI: {str(e)}")
+            # Fallback to MCP agent
+            try:
+                llm_controller = LLMController()
+                self.llm = llm_controller.get_client("mcp_agent")
+                if not self.llm:
+                    raise ValueError("MCP agent not available")
+                logger.info("Initialized MCP agent as fallback")
+            except Exception as mcp_error:
+                logger.error(f"Failed to initialize MCP agent: {str(mcp_error)}")
+                raise ValueError("Failed to initialize any LLM provider") from e
 
     async def natural_language_to_strategy(
         self, description: str
     ) -> StrategyTranslationResult:
         """
-        Convert a natural language strategy description to a structured strategy.
+        Convert natural language description to a structured strategy.
 
         Args:
-            description: Natural language description of trading strategy
+            description: Natural language description of the strategy
 
         Returns:
-            StrategyTranslationResult object containing structured strategy information
+            StrategyTranslationResult: Structured strategy information
         """
         try:
-            template = """
-            You are an expert in forex trading strategies and technical analysis.
-            Convert the following natural language description of a trading strategy into a structured format.
-            
-            Natural language description:
-            {description}
-            
-            Analyze the description and extract:
-            1. Strategy type (candlestick pattern, indicator-based, etc.)
-            2. Entry and exit conditions with precise parameters
-            3. Risk management settings (if any)
-            4. Suitable timeframes and currency pairs
-            
-            {format_instructions}
-            """
-
             parser = PydanticOutputParser(pydantic_object=StrategyTranslationResult)
+            format_instructions = parser.get_format_instructions()
+
             prompt = PromptTemplate(
-                template=template,
+                template="""
+                Translate the following forex trading strategy description into a structured format.
+                
+                Description:
+                {description}
+                
+                {format_instructions}
+                """,
                 input_variables=["description"],
-                partial_variables={
-                    "format_instructions": parser.get_format_instructions()
-                },
+                partial_variables={"format_instructions": format_instructions},
             )
 
             chain = LLMChain(llm=self.llm, prompt=prompt)
             result = await chain.arun(description=description)
 
+            # Parse the result
             parsed_result = parser.parse(result)
-
-            logger.info(
-                f"Successfully parsed natural language strategy: {parsed_result.strategy_type}"
-            )
             return parsed_result
 
         except Exception as e:
-            logger.error(f"Error parsing natural language strategy: {str(e)}")
-            raise StrategyError(f"Failed to parse natural language strategy: {str(e)}")
+            logger.error(f"Error translating natural language to strategy: {str(e)}")
+            raise StrategyError(
+                f"Failed to translate natural language to strategy: {str(e)}"
+            )
 
     async def generate_strategy_code(
-        self, strategy: Union[Dict[str, Any], BaseModel]
+        self, strategy: StrategyTranslationResult
     ) -> str:
         """
-        Generate Python code for a strategy based on its structured definition.
+        Generate Python code for a strategy.
 
         Args:
-            strategy: Structured strategy definition
+            strategy: Strategy translation result
 
         Returns:
-            String containing Python code implementing the strategy
+            str: Generated Python code
         """
         try:
-            if isinstance(strategy, BaseModel):
-                strategy_dict = strategy.dict()
-            else:
-                strategy_dict = strategy
-
-            template = """
-            You are a Python expert specializing in algorithmic trading implementations.
-            Generate clean, efficient, and well-commented Python code for the following trading strategy:
-            
-            Strategy definition:
-            {strategy}
-            
-            The code should:
-            1. Follow best practices for Python (PEP 8)
-            2. Include proper error handling
-            3. Be compatible with the Forex AI system architecture
-            4. Include docstrings and type hints
-            5. Be optimized for performance
-            
-            Return only the Python code with no additional explanation.
-            """
-
-            prompt = PromptTemplate(template=template, input_variables=["strategy"])
+            prompt = PromptTemplate(
+                template="""
+                Generate Python code for the following forex trading strategy:
+                
+                Strategy Type: {strategy_type}
+                Parameters: {parameters}
+                Entry Conditions: {entry_conditions}
+                Exit Conditions: {exit_conditions}
+                Risk Management: {risk_management}
+                Timeframes: {timeframes}
+                Currency Pairs: {pairs}
+                
+                The code should:
+                1. Be compatible with the Forex AI trading system
+                2. Use pandas and numpy for data manipulation
+                3. Include proper error handling
+                4. Be well-documented with comments
+                5. Follow PEP 8 style guidelines
+                
+                Return only the Python code without any additional text.
+                """,
+                input_variables=[
+                    "strategy_type",
+                    "parameters",
+                    "entry_conditions",
+                    "exit_conditions",
+                    "risk_management",
+                    "timeframes",
+                    "pairs",
+                ],
+            )
 
             chain = LLMChain(llm=self.llm, prompt=prompt)
-            result = await chain.arun(strategy=json.dumps(strategy_dict, indent=2))
+            result = await chain.arun(
+                strategy_type=strategy.strategy_type,
+                parameters=json.dumps(strategy.parameters),
+                entry_conditions=json.dumps(strategy.entry_conditions),
+                exit_conditions=json.dumps(strategy.exit_conditions),
+                risk_management=json.dumps(strategy.risk_management),
+                timeframes=json.dumps(strategy.timeframes),
+                pairs=json.dumps(strategy.pairs),
+            )
 
-            logger.info(f"Successfully generated strategy code")
-            return result.strip()
+            return result
 
         except Exception as e:
             logger.error(f"Error generating strategy code: {str(e)}")
             raise StrategyError(f"Failed to generate strategy code: {str(e)}")
 
-    async def translate_pinescript_to_python(self, pinescript_code: str) -> str:
+    async def translate_pinescript_to_python(self, pinescript: str) -> str:
         """
-        Translate TradingView PineScript code to Python code.
+        Translate TradingView PineScript to Python code.
 
         Args:
-            pinescript_code: PineScript code to translate
+            pinescript: PineScript code
 
         Returns:
-            Equivalent Python code
+            str: Python code
         """
         try:
-            template = """
-            You are an expert in both TradingView PineScript and Python for algorithmic trading.
-            Translate the following PineScript code to equivalent Python code that can run in the Forex AI system.
-            
-            PineScript code:
-            ```
-            {pinescript_code}
-            ```
-            
-            Your translation should:
-            1. Accurately preserve the strategy logic
-            2. Use appropriate Python libraries (pandas, numpy, ta-lib)
-            3. Follow Python best practices
-            4. Include detailed comments explaining the translation
-            5. Handle edge cases properly
-            
-            Return only the Python code with no additional explanation.
-            """
-
             prompt = PromptTemplate(
-                template=template, input_variables=["pinescript_code"]
+                template="""
+                Translate the following TradingView PineScript code to Python code for the Forex AI trading system:
+                
+                ```pinescript
+                {pinescript}
+                ```
+                
+                The Python code should:
+                1. Use pandas and numpy for data manipulation
+                2. Be compatible with the Forex AI trading system
+                3. Include proper error handling
+                4. Be well-documented with comments
+                5. Follow PEP 8 style guidelines
+                
+                Return only the Python code without any additional text.
+                """,
+                input_variables=["pinescript"],
             )
 
             chain = LLMChain(llm=self.llm, prompt=prompt)
-            result = await chain.arun(pinescript_code=pinescript_code)
+            result = await chain.arun(pinescript=pinescript)
 
-            logger.info(f"Successfully translated PineScript to Python")
-            return result.strip()
+            return result
 
         except Exception as e:
             logger.error(f"Error translating PineScript to Python: {str(e)}")
@@ -285,41 +280,38 @@ class LLMStrategyIntegrator:
 
     async def translate_python_to_pinescript(self, python_code: str) -> str:
         """
-        Translate Python trading code to TradingView PineScript.
+        Translate Python code to TradingView PineScript.
 
         Args:
-            python_code: Python code to translate
+            python_code: Python code
 
         Returns:
-            Equivalent PineScript code
+            str: PineScript code
         """
         try:
-            template = """
-            You are an expert in both Python algorithmic trading and TradingView PineScript.
-            Translate the following Python trading code to equivalent PineScript code.
-            
-            Python code:
-            ```
-            {python_code}
-            ```
-            
-            Your translation should:
-            1. Accurately preserve the strategy logic
-            2. Use appropriate PineScript functions and syntax
-            3. Follow PineScript best practices
-            4. Include detailed comments explaining the translation
-            5. Be compatible with TradingView
-            
-            Return only the PineScript code with no additional explanation.
-            """
-
-            prompt = PromptTemplate(template=template, input_variables=["python_code"])
+            prompt = PromptTemplate(
+                template="""
+                Translate the following Python code to TradingView PineScript:
+                
+                ```python
+                {python_code}
+                ```
+                
+                The PineScript code should:
+                1. Be compatible with TradingView
+                2. Include proper error handling
+                3. Be well-documented with comments
+                4. Follow PineScript best practices
+                
+                Return only the PineScript code without any additional text.
+                """,
+                input_variables=["python_code"],
+            )
 
             chain = LLMChain(llm=self.llm, prompt=prompt)
             result = await chain.arun(python_code=python_code)
 
-            logger.info(f"Successfully translated Python to PineScript")
-            return result.strip()
+            return result
 
         except Exception as e:
             logger.error(f"Error translating Python to PineScript: {str(e)}")
@@ -327,60 +319,49 @@ class LLMStrategyIntegrator:
 
     async def optimize_strategy(
         self, strategy: Dict[str, Any], performance_data: Dict[str, Any]
-    ) -> StrategyOptimizationSuggestion:
+    ) -> Dict[str, Any]:
         """
-        Analyze strategy performance and suggest optimizations.
+        Optimize a strategy based on performance data.
 
         Args:
-            strategy: Strategy configuration
-            performance_data: Historical performance metrics
+            strategy: Strategy definition
+            performance_data: Performance metrics
 
         Returns:
-            StrategyOptimizationSuggestion with recommendations
+            Dict[str, Any]: Optimized strategy
         """
         try:
-            template = """
-            You are an expert forex trading strategy optimizer.
-            Analyze the following strategy and its performance data to suggest improvements.
-            
-            Strategy configuration:
-            {strategy}
-            
-            Performance data:
-            {performance_data}
-            
-            Provide specific parameter changes that could improve performance.
-            Consider factors like:
-            1. Win rate and profit factor
-            2. Drawdown management
-            3. Entry and exit timing
-            4. Risk-reward ratio
-            5. Market condition adaptability
-            
-            {format_instructions}
-            """
-
-            parser = PydanticOutputParser(
-                pydantic_object=StrategyOptimizationSuggestion
-            )
             prompt = PromptTemplate(
-                template=template,
+                template="""
+                Optimize the following forex trading strategy based on its performance data:
+                
+                Strategy:
+                {strategy}
+                
+                Performance Data:
+                {performance_data}
+                
+                Suggest specific improvements to the strategy parameters, entry/exit conditions,
+                or risk management settings to improve its performance.
+                
+                Return the optimized strategy as a JSON object.
+                """,
                 input_variables=["strategy", "performance_data"],
-                partial_variables={
-                    "format_instructions": parser.get_format_instructions()
-                },
             )
 
             chain = LLMChain(llm=self.llm, prompt=prompt)
             result = await chain.arun(
-                strategy=json.dumps(strategy, indent=2),
-                performance_data=json.dumps(performance_data, indent=2),
+                strategy=json.dumps(strategy),
+                performance_data=json.dumps(performance_data),
             )
 
-            parsed_result = parser.parse(result)
-
-            logger.info(f"Successfully generated optimization suggestions")
-            return parsed_result
+            # Parse the result as JSON
+            try:
+                optimized_strategy = json.loads(result)
+                return optimized_strategy
+            except json.JSONDecodeError:
+                logger.error("Failed to parse optimization result as JSON")
+                raise StrategyError("Failed to parse optimization result as JSON")
 
         except Exception as e:
             logger.error(f"Error optimizing strategy: {str(e)}")

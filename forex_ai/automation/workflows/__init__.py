@@ -1,13 +1,7 @@
 """
-Predefined workflow definitions for the Forex AI Trading System.
+Workflow definitions for the Forex AI Trading System.
 
-This package contains predefined N8N workflow definitions for:
-- Data collection
-- Alert system
-- Performance reporting
-- YouTube video extraction and processing
+This package contains workflow definitions for various automation tasks.
 """
-
-# Workflows will be implemented in later phases
 
 __all__ = []

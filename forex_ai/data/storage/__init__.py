@@ -1,20 +1,27 @@
 """
-Storage clients for the Forex AI Trading System.
+Storage module for the Forex AI Trading System.
 
-This package contains clients for various storage systems,
-including PostgreSQL for persistent storage, Supabase for cloud storage,
-and Redis for caching.
+This module provides database and cache storage functionality
+using Redis for primary storage with in-memory fallback.
 """
 
-from forex_ai.data.storage.postgres_client import PostgresClient, get_postgres_client
-from forex_ai.data.storage.redis_client import RedisClient, get_redis_client
-from forex_ai.data.storage.supabase_client import SupabaseClient, get_supabase_db_client
+from forex_ai.data.storage.base import (
+    BaseStorage,
+    HashStorage,
+    ListStorage,
+    PubSubStorage,
+    LockStorage,
+    CompleteStorage
+)
+from forex_ai.data.storage.factory import get_storage
 
+# Export public interfaces
 __all__ = [
-    'PostgresClient',
-    'get_postgres_client',
-    'RedisClient',
-    'get_redis_client',
-    'SupabaseClient',
-    'get_supabase_db_client',
+    'BaseStorage',
+    'HashStorage',
+    'ListStorage',
+    'PubSubStorage',
+    'LockStorage',
+    'CompleteStorage',
+    'get_storage',
 ] 

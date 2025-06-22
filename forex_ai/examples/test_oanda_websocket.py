@@ -1,17 +1,31 @@
 """
 Test script for the OANDA WebSocket connector.
 
-This script tests the real-time price data streaming from OANDA via WebSocket,
-the processing of this data through the DataRouter, and the integration with
-technical analysis modules.
+This script is for DEVELOPMENT USE ONLY. It tests the real-time price data streaming 
+from OANDA via WebSocket, the processing of this data through the DataRouter, 
+and the integration with technical analysis modules.
+
+Required environment variables:
+- OANDA_ACCESS_TOKEN or OANDA_API_KEY
+- OANDA_ACCOUNT_ID
+
+WARNING: This script should never be used in production. In production,
+credentials should always come from the database/API.
 """
 
 import asyncio
 import logging
 import os
 import json
+import sys
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any
+
+# Add the project root to the Python path
+project_root = str(Path(__file__).parent.parent.parent)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
 from forex_ai.utils.logging import setup_logging, get_logger
 from forex_ai.core.data_router import DataRouter, DataType
@@ -29,23 +43,54 @@ logger = get_logger(__name__)
 
 # Configuration
 INSTRUMENTS = ["EUR_USD", "GBP_USD", "USD_JPY"]
-USE_PROXY = False  # Changed to False for direct Oanda connection
+USE_PROXY = False  # Direct connection to OANDA
 PROXY_URL = "ws://localhost:8080/stream"
 MAX_TEST_DURATION = 120  # seconds
-
-# Get credentials from environment variables
-OANDA_ACCOUNT_ID = os.environ.get("OANDA_ACCOUNT_ID", "")
-OANDA_ACCESS_TOKEN = os.environ.get("OANDA_ACCESS_TOKEN", "")
 
 # Price data storage (for technical analysis)
 price_cache = {}
 
 
+def get_oanda_credentials():
+    """
+    Get OANDA credentials from environment variables.
+    
+    Returns:
+        tuple: (access_token, account_id) or (None, None) if not found
+        
+    Raises:
+        SystemExit: If required environment variables are not set
+    """
+    logger.warning("DEVELOPMENT MODE: Using environment variables for OANDA credentials")
+    
+    # Check for required environment variables
+    access_token = os.environ.get("OANDA_ACCESS_TOKEN") or os.environ.get("OANDA_API_KEY")
+    account_id = os.environ.get("OANDA_ACCOUNT_ID")
+    
+    if not access_token:
+        logger.error("Neither OANDA_ACCESS_TOKEN nor OANDA_API_KEY environment variable is set")
+        print("Error: OANDA_ACCESS_TOKEN or OANDA_API_KEY environment variable must be set")
+        return None, None
+        
+    if not account_id:
+        logger.error("OANDA_ACCOUNT_ID environment variable not set")
+        print("Error: OANDA_ACCOUNT_ID environment variable must be set")
+        return None, None
+        
+    return access_token, account_id
+
+
 class OandaWebSocketTest:
     """Test harness for OANDA WebSocket integration."""
 
-    def __init__(self):
-        """Initialize the test harness."""
+    def __init__(self, access_token, account_id):
+        """
+        Initialize the test harness.
+        
+        Args:
+            access_token: OANDA API access token
+            account_id: OANDA account ID
+        """
         # Setup router
         self.data_router = DataRouter()
 
@@ -55,8 +100,8 @@ class OandaWebSocketTest:
             "proxy_url": PROXY_URL,
             "instruments": INSTRUMENTS,
             "max_reconnect_attempts": 3,
-            "account_id": OANDA_ACCOUNT_ID,
-            "access_token": OANDA_ACCESS_TOKEN,
+            "account_id": account_id,
+            "access_token": access_token,
         }
         self.oanda_connector = OandaWebSocketConnector(
             config=ws_config, data_router=self.data_router
@@ -231,14 +276,33 @@ class OandaWebSocketTest:
 
 async def main():
     """Main function."""
+    logger.info("OANDA WebSocket Test (DEVELOPMENT USE ONLY)")
+    logger.info("==========================================")
+    
+    # Get OANDA credentials
+    access_token, account_id = get_oanda_credentials()
+    if not access_token or not account_id:
+        sys.exit(1)
+    
+    logger.info(f"Using access token: {access_token[:5]}...{access_token[-5:]}")
+    logger.info(f"Using account ID: {account_id}")
+    
     try:
-        test = OandaWebSocketTest()
-        await test.test_websocket_connection()
+        # Initialize and run the test
+        test = OandaWebSocketTest(access_token, account_id)
+        success = await test.test_websocket_connection()
+        
+        if not success:
+            logger.error("Test failed")
+            sys.exit(1)
+            
+    except KeyboardInterrupt:
+        logger.info("Test interrupted by user")
     except Exception as e:
         logger.error(f"Test error: {str(e)}")
         import traceback
-
         traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -42,5 +42,12 @@ RUN adduser --disabled-password --gecos "" appuser
 RUN chown -R appuser:appuser /app
 USER appuser
 
+# Make the shell script executable
+RUN chmod +x run_server.sh
+
+# Default to production mode
+ENV ENVIRONMENT=production
+ENV FOREX_AI_DEV_MODE=false
+
 # Run the application
-CMD ["uvicorn", "forex_ai.api.main:app", "--host", "0.0.0.0", "--port", "8000"] 
+CMD ["./run_server.sh"] 

@@ -1,12 +1,14 @@
 # Core Web and API
+fastapi
 requests
 websockets
 websocket-client
+flask
+flask-cors
 
 # AI and ML
 google-cloud-aiplatform
 datasets
-openai
 
 # Data Processing and Technical Analysis
 numpy
@@ -16,16 +18,24 @@ pandas-ta
 # Utilities
 python-dotenv
 pytubefix
+colorama
+pydantic
 
 # Visualization
 matplotlib
 plotly
+uvicorn
+pyyaml
 
 # Testing
 pytest
+pytest-asyncio
 
 # Other
 IPython
+
+# Added from the code block
+isodate>=0.7.2
 
 
 

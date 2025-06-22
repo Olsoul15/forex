@@ -21,7 +21,7 @@ from forex_ai.config import settings
 from forex_ai.data.storage.redis_client import RedisClient
 from forex_ai.custom_types import MarketDataPoint, CurrencyPair, TimeFrame
 from forex_ai.exceptions import DataProcessingError, DataValidationError
-from forex_ai.data.storage.postgres_client import get_postgres_client
+from forex_ai.data.storage.supabase_client import get_supabase_db_client
 from forex_ai.data.connectors.alpha_vantage import AlphaVantageConnector
 
 logger = logging.getLogger(__name__)
@@ -53,8 +53,8 @@ def get_currency_pair_id(base: str, quote: str) -> int:
     Raises:
         ValueError: If the currency pair is not found.
     """
-    client = get_postgres_client()
-    pair = client.find_one(
+    client = get_supabase_db_client()
+    pair = client.fetch_one(
         "currency_pairs",
         {"base_currency": base.upper(), "quote_currency": quote.upper()}
     )
@@ -77,8 +77,8 @@ def get_currency_pair_by_id(pair_id: int) -> Tuple[str, str]:
     Raises:
         ValueError: If the currency pair ID is not found.
     """
-    client = get_postgres_client()
-    pair = client.find_one("currency_pairs", {"id": pair_id})
+    client = get_supabase_db_client()
+    pair = client.fetch_one("currency_pairs", {"id": pair_id})
     
     if not pair:
         raise ValueError(f"Currency pair with ID {pair_id} not found in database")
@@ -189,54 +189,204 @@ def fetch_market_data(
             "timeframe": timeframe_str
         }
         
-        # Add date range conditions to query
-        query_params = []
-        date_conditions = []
-        
-        if start_date:
-            date_conditions.append("timestamp >= %s")
-            query_params.append(start_date)
-        
-        if end_date:
-            date_conditions.append("timestamp <= %s")
-            query_params.append(end_date)
-        
-        # Build query
-        query = f"""
-            SELECT timestamp, open, high, low, close, volume
-            FROM market_data
-            WHERE currency_pair_id = %s AND timeframe = %s
-        """
-        query_params = [currency_pair_id, timeframe_str]
-        
-        if date_conditions:
-            query += " AND " + " AND ".join(date_conditions)
+        # Add date range conditions if provided
+        if start_date or end_date:
+            date_conditions = {}
+            if start_date:
+                date_conditions["gte"] = start_date.isoformat()
+            if end_date:
+                date_conditions["lte"] = end_date.isoformat()
             
-        query += " ORDER BY timestamp DESC"
+            conditions["timestamp"] = date_conditions
         
-        # Execute query
-        client = get_postgres_client()
-        results = client.execute(query, tuple(query_params))
-        
-        if not results:
-            logger.warning(f"No market data found for {base}/{quote} ({timeframe_str})")
-            return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+        # Query the database using Supabase
+        client = get_supabase_db_client()
+        data = client.fetch_all(
+            "market_data",
+            where=conditions,
+            order_by="timestamp"
+        )
         
         # Convert to DataFrame
-        df = pd.DataFrame(results)
+        if not data:
+            logger.warning(f"No data found for {base}/{quote} {timeframe_str}")
+            return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+        
+        df = pd.DataFrame(data)
+        
+        # Convert timestamp to datetime
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
         
         # Set timestamp as index
         df.set_index("timestamp", inplace=True)
         
-        # Sort by timestamp
-        df.sort_index(inplace=True)
-        
         return df
-    
+        
     except Exception as e:
-        error_msg = f"Error fetching market data: {str(e)}"
-        logger.error(error_msg)
-        raise DataProcessingError(error_msg) from e
+        logger.error(f"Error fetching market data: {str(e)}")
+        raise DataProcessingError(f"Failed to fetch market data: {str(e)}")
+
+def save_market_data(
+    df: pd.DataFrame,
+    currency_pair: Union[str, CurrencyPair],
+    timeframe: Union[str, TimeFrame],
+    overwrite: bool = False
+) -> int:
+    """
+    Save market data to the database.
+    
+    Args:
+        df: DataFrame with market data.
+        currency_pair: Currency pair (e.g., "EUR/USD" or CurrencyPair instance).
+        timeframe: Timeframe (e.g., "1h" or TimeFrame instance).
+        overwrite: Whether to overwrite existing data.
+        
+    Returns:
+        Number of rows saved.
+        
+    Raises:
+        DataProcessingError: If saving the data fails.
+    """
+    try:
+        # Validate the DataFrame
+        validate_dataframe(df)
+        
+        # Handle string currency pair
+        if isinstance(currency_pair, str):
+            if len(currency_pair) != 7 or currency_pair[3] != '/':
+                raise ValueError(f"Invalid currency pair format: {currency_pair}. Expected format: 'XXX/YYY'")
+            base = currency_pair[:3]
+            quote = currency_pair[4:]
+        else:
+            base = currency_pair.base
+            quote = currency_pair.quote
+        
+        # Handle string timeframe
+        if isinstance(timeframe, str):
+            timeframe_str = timeframe
+        else:
+            timeframe_str = timeframe.value
+        
+        # Get currency pair ID
+        currency_pair_id = get_currency_pair_id(base, quote)
+        
+        # Reset index if timestamp is the index
+        if df.index.name == "timestamp":
+            df = df.reset_index()
+        
+        # Prepare data for insertion
+        records = []
+        for _, row in df.iterrows():
+            record = {
+                "currency_pair_id": currency_pair_id,
+                "timeframe": timeframe_str,
+                "timestamp": row["timestamp"].isoformat(),
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"]),
+                "volume": float(row.get("volume", 0)),
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+            }
+            records.append(record)
+        
+        # If overwrite is True, delete existing data for this currency pair and timeframe
+        client = get_supabase_db_client()
+        if overwrite:
+            # Get the timestamp range from the DataFrame
+            min_timestamp = df["timestamp"].min().isoformat()
+            max_timestamp = df["timestamp"].max().isoformat()
+            
+            # Delete existing data in this range
+            client.delete(
+                "market_data",
+                {
+                    "currency_pair_id": currency_pair_id,
+                    "timeframe": timeframe_str,
+                    "timestamp": {
+                        "gte": min_timestamp,
+                        "lte": max_timestamp
+                    }
+                }
+            )
+        
+        # Insert new data
+        result = client.insert_many("market_data", records)
+        
+        return len(records)
+        
+    except Exception as e:
+        logger.error(f"Error saving market data: {str(e)}")
+        raise DataProcessingError(f"Failed to save market data: {str(e)}")
+
+def export_trade_history(
+    strategy_id: str,
+    file_path: str,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    format: str = "csv"
+) -> None:
+    """
+    Export trade history for a strategy to a file.
+    
+    Args:
+        strategy_id: ID of the strategy.
+        file_path: Path to save the file.
+        start_date: Start date for the export.
+        end_date: End date for the export.
+        format: Export format (csv, json, excel).
+        
+    Raises:
+        DataProcessingError: If exporting fails.
+    """
+    try:
+        # Prepare query conditions
+        conditions = {"strategy_id": strategy_id}
+        
+        # Add date range conditions if provided
+        if start_date or end_date:
+            date_conditions = {}
+            if start_date:
+                date_conditions["gte"] = start_date.isoformat()
+            if end_date:
+                date_conditions["lte"] = end_date.isoformat()
+            
+            conditions["timestamp"] = date_conditions
+        
+        # Query the database
+        client = get_supabase_db_client()
+        trades = client.fetch_all(
+            "trades",
+            where=conditions,
+            order_by="timestamp"
+        )
+        
+        # Convert to DataFrame
+        if not trades:
+            logger.warning(f"No trades found for strategy {strategy_id}")
+            df = pd.DataFrame(columns=["timestamp", "order_id", "type", "price", "size", "profit"])
+        else:
+            df = pd.DataFrame(trades)
+            
+            # Convert timestamp to datetime
+            df["timestamp"] = pd.to_datetime(df["timestamp"])
+        
+        # Export to file
+        if format.lower() == "csv":
+            df.to_csv(file_path, index=False)
+        elif format.lower() == "json":
+            df.to_json(file_path, orient="records", date_format="iso")
+        elif format.lower() == "excel":
+            df.to_excel(file_path, index=False)
+        else:
+            raise ValueError(f"Unsupported export format: {format}")
+        
+        logger.info(f"Exported {len(df)} trades to {file_path}")
+        
+    except Exception as e:
+        logger.error(f"Error exporting trade history: {str(e)}")
+        raise DataProcessingError(f"Failed to export trade history: {str(e)}")
 
 def import_from_csv(
     file_path: str,
@@ -594,82 +744,5 @@ def normalize_data(data: pd.DataFrame, method: str = "minmax") -> pd.DataFrame:
         
     except Exception as e:
         error_msg = f"Error normalizing data: {str(e)}"
-        logger.error(error_msg)
-        raise DataProcessingError(error_msg) from e
-
-def export_trade_history(
-    strategy_id: str,
-    file_path: str,
-    start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None,
-    format: str = "csv"
-) -> None:
-    """
-    Export trade history for a strategy.
-    
-    Args:
-        strategy_id: ID of the strategy.
-        file_path: Path to save the export file.
-        start_date: Start date for the data range.
-        end_date: End date for the data range.
-        format: Export format (csv, json, excel).
-        
-    Raises:
-        DataProcessingError: If exporting the data fails.
-    """
-    try:
-        # Build query
-        query = """
-            SELECT 
-                o.id, cp.base_currency, cp.quote_currency, 
-                o.direction, o.entry_price, o.stop_loss, o.take_profit,
-                o.volume, o.status, o.open_time, o.close_time, 
-                o.close_price, o.profit_loss, o.comment
-            FROM orders o
-            JOIN currency_pairs cp ON o.currency_pair_id = cp.id
-            JOIN trading_signals ts ON o.signal_id = ts.id
-            WHERE ts.strategy_id = %s
-        """
-        query_params = [strategy_id]
-        
-        if start_date:
-            query += " AND o.open_time >= %s"
-            query_params.append(start_date)
-            
-        if end_date:
-            query += " AND o.open_time <= %s"
-            query_params.append(end_date)
-            
-        query += " ORDER BY o.open_time DESC"
-        
-        # Execute query
-        client = get_postgres_client()
-        results = client.execute(query, tuple(query_params))
-        
-        if not results:
-            logger.warning(f"No trade history found for strategy {strategy_id}")
-            return
-        
-        # Convert to DataFrame
-        df = pd.DataFrame(results)
-        
-        # Add currency pair column
-        df["currency_pair"] = df.apply(lambda row: f"{row['base_currency'].strip()}/{row['quote_currency'].strip()}", axis=1)
-        
-        # Drop redundant columns
-        df.drop(columns=["base_currency", "quote_currency"], inplace=True)
-        
-        # Export based on format
-        if format.lower() == "csv":
-            export_to_csv(df, file_path)
-        elif format.lower() == "json":
-            export_to_json(df, file_path)
-        elif format.lower() == "excel":
-            export_to_excel(df, file_path)
-        else:
-            raise ValueError(f"Unsupported export format: {format}")
-            
-    except Exception as e:
-        error_msg = f"Error exporting trade history: {str(e)}"
         logger.error(error_msg)
         raise DataProcessingError(error_msg) from e 

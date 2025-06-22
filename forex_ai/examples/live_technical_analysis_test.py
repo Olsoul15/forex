@@ -1,25 +1,39 @@
 """
 Live technical analysis test with OANDA data and AutoAgent integration.
 
-This script:
-1. Connects to OANDA's API to stream real-time price data
-2. Processes the data through the DataRouter
-3. Initializes the AutoAgent orchestrator for AI-powered analysis
-4. Performs real-time technical analysis with pattern recognition
-5. Displays the analysis results and generates trading signals
+This script is for DEVELOPMENT USE ONLY. It demonstrates:
+1. Connecting to OANDA's API to stream real-time price data
+2. Processing the data through the DataRouter
+3. Initializing the AutoAgent orchestrator for AI-powered analysis
+4. Performing real-time technical analysis with pattern recognition
+5. Displaying the analysis results and generating trading signals
+
+Required environment variables:
+- OANDA_ACCESS_TOKEN or OANDA_API_KEY
+- OANDA_ACCOUNT_ID
+
+WARNING: This script should never be used in production. In production,
+credentials should always come from the database/API.
 """
 
 import asyncio
 import os
 import json
 import logging
+import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-# Configure logging
-from forex_ai.utils.logging import get_logger, setup_file_logging
+# Add the project root to the Python path
+project_root = str(Path(__file__).parent.parent.parent)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-setup_file_logging()
+# Configure logging
+from forex_ai.utils.logging import get_logger, setup_logging
+
+setup_logging()
 logger = get_logger(__name__)
 
 # Import core components
@@ -38,25 +52,51 @@ INSTRUMENTS = ["EUR_USD", "GBP_USD", "USD_JPY"]
 USE_PROXY = False  # Direct connection to OANDA
 MAX_TEST_DURATION = 300  # 5 minutes
 
-# Fetch API credentials from environment variables
-OANDA_ACCOUNT_ID = os.environ.get("OANDA_ACCOUNT_ID", "")
-OANDA_ACCESS_TOKEN = os.environ.get("OANDA_ACCESS_TOKEN", "")
-
-if not OANDA_ACCOUNT_ID or not OANDA_ACCESS_TOKEN:
-    raise ValueError(
-        "OANDA_ACCOUNT_ID and OANDA_ACCESS_TOKEN environment variables must be set"
-    )
-
 # Data storage for analysis
 price_cache = {}
 analysis_results = {}
 
 
+def get_oanda_credentials():
+    """
+    Get OANDA credentials from environment variables.
+    
+    Returns:
+        tuple: (access_token, account_id) or (None, None) if not found
+        
+    Raises:
+        SystemExit: If required environment variables are not set
+    """
+    logger.warning("DEVELOPMENT MODE: Using environment variables for OANDA credentials")
+    
+    # Check for required environment variables
+    access_token = os.environ.get("OANDA_ACCESS_TOKEN") or os.environ.get("OANDA_API_KEY")
+    account_id = os.environ.get("OANDA_ACCOUNT_ID")
+    
+    if not access_token:
+        logger.error("Neither OANDA_ACCESS_TOKEN nor OANDA_API_KEY environment variable is set")
+        print("Error: OANDA_ACCESS_TOKEN or OANDA_API_KEY environment variable must be set")
+        return None, None
+        
+    if not account_id:
+        logger.error("OANDA_ACCOUNT_ID environment variable not set")
+        print("Error: OANDA_ACCOUNT_ID environment variable must be set")
+        return None, None
+        
+    return access_token, account_id
+
+
 class LiveTechnicalAnalysisTest:
     """Test harness for live technical analysis with AutoAgent integration."""
 
-    def __init__(self):
-        """Initialize the test harness."""
+    def __init__(self, access_token, account_id):
+        """
+        Initialize the test harness.
+        
+        Args:
+            access_token: OANDA API access token
+            account_id: OANDA account ID
+        """
         logger.info("Initializing live technical analysis test")
 
         # Setup router
@@ -67,8 +107,8 @@ class LiveTechnicalAnalysisTest:
             "use_proxy": USE_PROXY,
             "instruments": INSTRUMENTS,
             "max_reconnect_attempts": 3,
-            "account_id": OANDA_ACCOUNT_ID,
-            "access_token": OANDA_ACCESS_TOKEN,
+            "account_id": account_id,
+            "access_token": access_token,
         }
         self.oanda_connector = OandaWebSocketConnector(
             config=ws_config, data_router=self.data_router
@@ -329,63 +369,64 @@ class LiveTechnicalAnalysisTest:
             logger.error(f"Error processing with AutoAgent: {str(e)}")
 
     def print_test_results(self):
-        """Print test results and metrics."""
-        logger.info("=== TEST RESULTS ===")
+        """Print test results summary."""
+        logger.info("\n===== Test Results =====")
         logger.info(f"Total messages processed: {self.message_count}")
         logger.info(f"Total analyses performed: {self.analysis_count}")
 
+        # Calculate processing time statistics
         if self.processing_times:
             avg_time = sum(self.processing_times) / len(self.processing_times)
+            max_time = max(self.processing_times)
+            min_time = min(self.processing_times)
             logger.info(f"Average processing time: {avg_time:.2f} ms")
+            logger.info(f"Max processing time: {max_time:.2f} ms")
+            logger.info(f"Min processing time: {min_time:.2f} ms")
 
-        for instrument in INSTRUMENTS:
-            if instrument in price_cache:
-                logger.info(
-                    f"{instrument}: {len(price_cache[instrument])} ticks received"
-                )
+        # Print analysis results
+        logger.info("\nAnalysis Results:")
+        for instrument, results in analysis_results.items():
+            logger.info(f"\n{instrument}:")
+            for timeframe, result in results.items():
+                logger.info(f"  {timeframe}:")
+                for key, value in result.items():
+                    if isinstance(value, dict):
+                        logger.info(f"    {key}:")
+                        for k, v in value.items():
+                            logger.info(f"      {k}: {v}")
+                    else:
+                        logger.info(f"    {key}: {value}")
 
-            if instrument in analysis_results:
-                logger.info(
-                    f"{instrument}: {len(analysis_results[instrument])} analyses performed"
-                )
-
-                # Show latest analysis summary
-                if analysis_results[instrument]:
-                    latest = analysis_results[instrument][-1]
-                    logger.info(f"Latest analysis ({latest['timeframe']}):")
-                    logger.info(
-                        f"  Direction: {latest['analysis'].get('direction', 'unknown')}"
-                    )
-                    logger.info(
-                        f"  Confidence: {latest['analysis'].get('confidence', 0):.2f}"
-                    )
-
-                    # Show signals if any
-                    signals = latest["autoagent_result"].get("signals", [])
-                    if signals:
-                        logger.info(f"  Signals: {len(signals)}")
-                        for signal in signals[:2]:  # Show first 2 signals
-                            logger.info(
-                                f"    {signal.get('direction')} ({signal.get('confidence'):.2f})"
-                            )
+        logger.info("=======================\n")
 
 
 async def main():
-    """Main entry point."""
-    logger.info("Starting live technical analysis with AutoAgent integration")
-
-    # Check for credentials
-    if not OANDA_ACCOUNT_ID or not OANDA_ACCESS_TOKEN:
-        logger.error("OANDA credentials not set. Please set environment variables:")
-        logger.error("  OANDA_ACCOUNT_ID")
-        logger.error("  OANDA_ACCESS_TOKEN")
-        return
-
-    # Create and run test
-    test = LiveTechnicalAnalysisTest()
-    await test.run()
-
-    logger.info("Test completed")
+    """Main function."""
+    logger.info("Live Technical Analysis Test (DEVELOPMENT USE ONLY)")
+    logger.info("==================================================")
+    
+    # Get OANDA credentials
+    access_token, account_id = get_oanda_credentials()
+    if not access_token or not account_id:
+        sys.exit(1)
+    
+    logger.info(f"Using access token: {access_token[:5]}...{access_token[-5:]}")
+    logger.info(f"Using account ID: {account_id}")
+    
+    try:
+        # Initialize and run the test
+        test = LiveTechnicalAnalysisTest(access_token, account_id)
+        success = await test.run()
+        
+        if not success:
+            logger.error("Test failed")
+            sys.exit(1)
+            
+    except KeyboardInterrupt:
+        logger.info("Test interrupted by user")
+    except Exception as e:
+        logger.error(f"Test error: {str(e)}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -6,18 +6,14 @@ build-backend = "setuptools.build_meta"
 name = "forex_ai"
 version = "0.1.0"
 authors = [
-  { name="Forex AI Team", email="info@forexai.example.com" },
+    { name="Your Name", email="your.email@example.com" },
 ]
-description = "AI-Powered Forex Trading System"
+description = "Forex AI trading system"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.8"
 classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Financial and Insurance Industry",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Topic :: Office/Business :: Financial :: Investment",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
 ]
 dependencies = [
     "fastapi",
@@ -61,7 +57,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/shawn-warnock/forex_ai"
+"Homepage" = "https://github.com/yourusername/forex"
+"Bug Tracker" = "https://github.com/yourusername/forex/issues"
 
 [project.scripts]
 forex-ai = "forex_ai.cli:main"

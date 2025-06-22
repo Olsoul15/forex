@@ -12,7 +12,7 @@ import math
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 
-from app.models.market_data_models import (
+from forex_ai.models.market_data_models import (
     TimeFrame,
     PriceType,
     InstrumentInfo,
@@ -41,6 +41,7 @@ def initialize_instruments():
 
     # Major pairs
     instruments_db["EUR_USD"] = InstrumentInfo(
+        instrument="EUR_USD",
         name="EUR_USD",
         display_name="EUR/USD",
         pip_location=-4,
@@ -54,6 +55,7 @@ def initialize_instruments():
     )
 
     instruments_db["GBP_USD"] = InstrumentInfo(
+        instrument="GBP_USD",
         name="GBP_USD",
         display_name="GBP/USD",
         pip_location=-4,
@@ -67,6 +69,7 @@ def initialize_instruments():
     )
 
     instruments_db["USD_JPY"] = InstrumentInfo(
+        instrument="USD_JPY",
         name="USD_JPY",
         display_name="USD/JPY",
         pip_location=-2,
@@ -81,6 +84,7 @@ def initialize_instruments():
 
     # Minor pairs
     instruments_db["EUR_GBP"] = InstrumentInfo(
+        instrument="EUR_GBP",
         name="EUR_GBP",
         display_name="EUR/GBP",
         pip_location=-4,
@@ -94,6 +98,7 @@ def initialize_instruments():
     )
 
     instruments_db["AUD_USD"] = InstrumentInfo(
+        instrument="AUD_USD",
         name="AUD_USD",
         display_name="AUD/USD",
         pip_location=-4,
@@ -107,6 +112,7 @@ def initialize_instruments():
     )
 
     instruments_db["USD_CAD"] = InstrumentInfo(
+        instrument="USD_CAD",
         name="USD_CAD",
         display_name="USD/CAD",
         pip_location=-4,
@@ -121,6 +127,7 @@ def initialize_instruments():
 
     # Exotic pairs
     instruments_db["USD_SGD"] = InstrumentInfo(
+        instrument="USD_SGD",
         name="USD_SGD",
         display_name="USD/SGD",
         pip_location=-4,
@@ -134,6 +141,7 @@ def initialize_instruments():
     )
 
     instruments_db["EUR_NOK"] = InstrumentInfo(
+        instrument="EUR_NOK",
         name="EUR_NOK",
         display_name="EUR/NOK",
         pip_location=-4,
@@ -148,6 +156,7 @@ def initialize_instruments():
 
     # Commodity pairs
     instruments_db["XAU_USD"] = InstrumentInfo(
+        instrument="XAU_USD",
         name="XAU_USD",
         display_name="Gold",
         pip_location=-2,
@@ -286,6 +295,21 @@ def generate_price_history(
     # Get instrument info
     if instrument not in instruments_db:
         raise ValueError(f"Instrument {instrument} not found")
+
+    # Convert string dates to datetime if needed
+    if isinstance(from_time, str) and from_time:
+        try:
+            from_time = datetime.fromisoformat(from_time.replace('Z', '+00:00'))
+        except Exception as e:
+            logger.error(f"Error parsing from_time: {str(e)}")
+            from_time = None
+            
+    if isinstance(to_time, str) and to_time:
+        try:
+            to_time = datetime.fromisoformat(to_time.replace('Z', '+00:00'))
+        except Exception as e:
+            logger.error(f"Error parsing to_time: {str(e)}")
+            to_time = None
 
     instrument_info = instruments_db[instrument]
 
@@ -459,7 +483,7 @@ def get_instrument_details(instrument_name: str) -> Optional[Dict[str, Any]]:
 
     # Additional details for the instrument
     details = {
-        "instrument": instrument,
+        "instrument": instrument_name,
         "trading_hours": {
             "sunday": {"open": "21:00", "close": "23:59"},
             "monday": {"open": "00:00", "close": "23:59"},

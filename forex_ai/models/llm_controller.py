@@ -1,15 +1,13 @@
 """
 LLM Controller
-Manages the initialization and access to various LLM providers.
+Manages the initialization and access to the MCP agent.
 """
 
 import logging
 from typing import Dict, Any, Optional
 
-from google.cloud import aiplatform
-import google.auth
-
-from forex_ai.config.settings import LLMSettings
+from forex_ai.config.settings import get_settings
+from forex_ai.models.mcp import MCPAgent, get_mcp_agent
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -17,79 +15,69 @@ logger = logging.getLogger(__name__)
 
 class LLMController:
     """
-    Manages the initialization and access to the Google Vertex AI client.
+    Manages the initialization and access to the MCP agent.
     """
 
-    def __init__(self, settings: Optional[LLMSettings] = None):
+    def __init__(self):
         """
-        Initializes the LLMController and the Vertex AI client.
-
-        Args:
-            settings: An optional LLMSettings object. If not provided,
-                      default settings will be used.
+        Initializes the LLMController and the MCP agent.
         """
-        self.settings = settings or LLMSettings()
+        self.settings = get_settings()
         self._clients: Dict[str, Any] = {}
         self._initialize_clients()
 
     def _initialize_clients(self) -> None:
         """
-        Initializes the Google Vertex AI client.
+        Initializes the MCP agent.
         """
         try:
-            # The Google client library uses ADC (Application Default Credentials)
-            # It will automatically find credentials if they are configured in the environment
-            # (e.g., via `gcloud auth application-default login`)
-            credentials, project = google.auth.default()
-            aiplatform.init(project=project, credentials=credentials, location=self.settings.GCP_LOCATION)
-            self._clients["vertex_ai"] = aiplatform
-            logger.info("Google Vertex AI client initialized successfully.")
+            # Initialize the MCP agent
+            mcp_agent = get_mcp_agent()
+            if mcp_agent.is_initialized():
+                self._clients["mcp_agent"] = mcp_agent
+                logger.info("MCP agent initialized successfully.")
+            else:
+                logger.error("Failed to initialize MCP agent.")
         except Exception as e:
-            logger.error(f"Failed to initialize Google Vertex AI client: {str(e)}")
+            logger.error(f"Failed to initialize MCP agent: {str(e)}")
 
-    def get_client(self, provider: str = "vertex_ai") -> Optional[Any]:
+    def get_client(self, provider: str = "mcp_agent") -> Optional[Any]:
         """
         Returns the client for the specified provider.
 
         Args:
-            provider: The name of the LLM provider. Defaults to "vertex_ai".
+            provider: The name of the LLM provider. Defaults to "mcp_agent".
 
         Returns:
             The client object if available, otherwise None.
         """
-        if provider != "vertex_ai":
-            logger.warning(f"Provider '{provider}' is not supported. Only 'vertex_ai' is available.")
+        if provider != "mcp_agent":
+            logger.warning(f"Provider '{provider}' is not supported. Only 'mcp_agent' is available.")
             return None
         return self._clients.get(provider)
 
     def get_available_models(self) -> Dict[str, Any]:
         """
-        Returns a dictionary of available models, configured for Vertex AI.
+        Returns a dictionary of available models.
         """
-        if "vertex_ai" not in self._clients:
+        if "mcp_agent" not in self._clients:
             return {}
 
-        # Example Vertex AI models
-        # Users should configure these in their settings
-        vertex_models = {
-            "gemini-1.0-pro": {
-                "name": "gemini-1.0-pro",
-                "provider": "vertex_ai",
-                "class_name": "VertexAIModel",  # Placeholder for your model handling class
-            },
-            "gemini-1.5-flash": {
-                "name": "gemini-1.5-flash-001",
-                "provider": "vertex_ai",
-                "class_name": "VertexAIModel", # Placeholder for your model handling class
+        # MCP agent models
+        mcp_models = {
+            "mcp-agent": {
+                "name": "mcp-agent",
+                "provider": "mcp_agent",
+                "class_name": "MCPAgent",
             },
         }
-        return vertex_models
+        return mcp_models
 
     def get_status(self) -> Dict[str, bool]:
         """
-        Returns the connection status of the Vertex AI client.
+        Returns the connection status of the MCP agent.
 
         Returns:
             A dictionary with the provider name and its connection status.
         """
-        return {"vertex_ai": "vertex_ai" in self._clients}
+        return {"mcp_agent": "mcp_agent" in self._clients}

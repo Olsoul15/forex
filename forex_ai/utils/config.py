@@ -8,9 +8,34 @@ settings across the system.
 import os
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
+
+
+def get_env_var(primary_key: str, fallback_keys: List[str] = None, default: Any = None) -> Any:
+    """
+    Get environment variable with fallback keys.
+    
+    Args:
+        primary_key: Primary environment variable key
+        fallback_keys: List of fallback keys to try if primary key is not set
+        default: Default value if no keys are set
+        
+    Returns:
+        Environment variable value or default
+    """
+    value = os.environ.get(primary_key)
+    if value is not None:
+        return value
+        
+    if fallback_keys:
+        for key in fallback_keys:
+            value = os.environ.get(key)
+            if value is not None:
+                return value
+                
+    return default
 
 
 def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:

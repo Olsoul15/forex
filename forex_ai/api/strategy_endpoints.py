@@ -57,8 +57,38 @@ def init_strategy_repository():
         SupabaseStrategyRepository,
     )
 
-    strategy_repository = SupabaseStrategyRepository()
-    logger.info("Strategy repository initialized")
+    try:
+        strategy_repository = SupabaseStrategyRepository()
+        logger.info("Strategy repository initialized")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Supabase strategy repository: {str(e)}")
+        logger.warning("Using mock strategy repository instead")
+        
+        # Create a simple mock repository with basic functionality
+        class MockStrategyRepository:
+            async def save_strategy(self, strategy_dict):
+                logger.info(f"Mock: Saving strategy {strategy_dict.get('name', 'unnamed')}")
+                return {"id": "mock-strategy-id", **strategy_dict}
+                
+            async def get_strategy(self, strategy_id):
+                logger.info(f"Mock: Getting strategy {strategy_id}")
+                return {"id": strategy_id, "name": "Mock Strategy"}
+                
+            async def list_strategies(self):
+                logger.info("Mock: Listing strategies")
+                return []
+                
+            async def delete_strategy(self, strategy_id):
+                logger.info(f"Mock: Deleting strategy {strategy_id}")
+                return True
+                
+            async def update_strategy(self, strategy_id, strategy_dict):
+                logger.info(f"Mock: Updating strategy {strategy_id}")
+                return {"id": strategy_id, **strategy_dict}
+        
+        strategy_repository = MockStrategyRepository()
+        logger.info("Mock strategy repository initialized")
+    
     return strategy_repository
 
 

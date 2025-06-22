@@ -1,18 +1,35 @@
 """
 Basic OANDA API test script.
 
-This script tests the connection to OANDA's API and retrieves
-current price data using their REST API instead of WebSocket.
+This script is for DEVELOPMENT USE ONLY. It tests the connection to OANDA's API 
+and retrieves current price data using their REST API instead of WebSocket.
+
+Required environment variables:
+- OANDA_ACCESS_TOKEN or OANDA_API_KEY
+- OANDA_ACCOUNT_ID
+
+WARNING: This script should never be used in production. In production,
+credentials should always come from the database/API.
 """
 
 import os
+import sys
 import requests
 import json
+import logging
 from datetime import datetime
+from pathlib import Path
 
-# OANDA API credentials
-OANDA_API_KEY = "f1086a5e2c1718a39aa9c8dd0c38f5c9-0329c78b1d1cc274a149ff4151365df0"
-OANDA_ACCOUNT_ID = os.environ.get("OANDA_ACCOUNT_ID", "")
+# Add the project root to the Python path
+project_root = str(Path(__file__).parent.parent.parent)
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+from forex_ai.utils.logging import setup_logging, get_logger
+
+# Set up logging
+setup_logging()
+logger = get_logger(__name__)
 
 # Instruments to get prices for
 INSTRUMENTS = ["EUR_USD", "GBP_USD", "USD_JPY"]
@@ -22,23 +39,49 @@ PRICES_ENDPOINT = "https://api-fxpractice.oanda.com/v3/accounts/{}/pricing"
 INSTRUMENTS_ENDPOINT = "https://api-fxpractice.oanda.com/v3/accounts/{}/instruments"
 
 
-def get_current_prices():
+def get_oanda_credentials():
+    """
+    Get OANDA credentials from environment variables.
+    
+    Returns:
+        tuple: (access_token, account_id) or (None, None) if not found
+        
+    Raises:
+        SystemExit: If required environment variables are not set
+    """
+    logger.warning("DEVELOPMENT MODE: Using environment variables for OANDA credentials")
+    
+    # Check for required environment variables
+    access_token = os.environ.get("OANDA_ACCESS_TOKEN") or os.environ.get("OANDA_API_KEY")
+    account_id = os.environ.get("OANDA_ACCOUNT_ID")
+    
+    if not access_token:
+        logger.error("Neither OANDA_ACCESS_TOKEN nor OANDA_API_KEY environment variable is set")
+        print("Error: OANDA_ACCESS_TOKEN or OANDA_API_KEY environment variable must be set")
+        return None, None
+        
+    if not account_id:
+        logger.error("OANDA_ACCOUNT_ID environment variable not set")
+        print("Error: OANDA_ACCOUNT_ID environment variable must be set")
+        return None, None
+        
+    return access_token, account_id
+
+
+def get_current_prices(access_token, account_id):
     """
     Get current prices from OANDA's REST API.
+    
+    Args:
+        access_token: OANDA API access token
+        account_id: OANDA account ID
+        
+    Returns:
+        dict: Price data or None if request failed
     """
-    if not OANDA_ACCOUNT_ID:
-        print("Error: OANDA_ACCOUNT_ID environment variable not set")
-        account_id = input("Enter your OANDA account ID: ")
-        if not account_id:
-            print("Error: OANDA account ID is required")
-            return None
-        os.environ["OANDA_ACCOUNT_ID"] = account_id
-    else:
-        account_id = OANDA_ACCOUNT_ID
-
     # Prepare API request
     headers = {
-        "Authorization": f"Bearer {OANDA_API_KEY}",
+        "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
 
@@ -84,23 +127,20 @@ def get_current_prices():
         return None
 
 
-def get_account_instruments():
+def get_account_instruments(access_token, account_id):
     """
     Get available instruments for the account.
+    
+    Args:
+        access_token: OANDA API access token
+        account_id: OANDA account ID
+        
+    Returns:
+        dict: Instruments data or None if request failed
     """
-    if not OANDA_ACCOUNT_ID:
-        print("Error: OANDA_ACCOUNT_ID environment variable not set")
-        account_id = input("Enter your OANDA account ID: ")
-        if not account_id:
-            print("Error: OANDA account ID is required")
-            return None
-        os.environ["OANDA_ACCOUNT_ID"] = account_id
-    else:
-        account_id = OANDA_ACCOUNT_ID
-
     # Prepare API request
     headers = {
-        "Authorization": f"Bearer {OANDA_API_KEY}",
+        "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
 
@@ -141,15 +181,22 @@ def get_account_instruments():
 
 def main():
     """Main function."""
-    print("OANDA API Test")
-    print("=============")
-    print(f"Using API key: {OANDA_API_KEY[:5]}...{OANDA_API_KEY[-5:]}")
+    print("OANDA API Test (DEVELOPMENT USE ONLY)")
+    print("====================================")
+    
+    # Get OANDA credentials
+    access_token, account_id = get_oanda_credentials()
+    if not access_token or not account_id:
+        sys.exit(1)
+    
+    print(f"Using access token: {access_token[:5]}...{access_token[-5:]}")
+    print(f"Using account ID: {account_id}")
 
     # Get account instruments
-    instruments_data = get_account_instruments()
+    instruments_data = get_account_instruments(access_token, account_id)
 
     # Get current prices
-    prices_data = get_current_prices()
+    prices_data = get_current_prices(access_token, account_id)
 
     if prices_data:
         print("\nSuccessfully retrieved price data from OANDA API")

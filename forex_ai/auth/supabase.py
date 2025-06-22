@@ -4,6 +4,7 @@ Supabase authentication client for Forex AI Trading System.
 
 import os
 import logging
+import time
 from typing import Dict, Any, Optional
 from functools import lru_cache
 
@@ -12,6 +13,8 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import APIKeyHeader, HTTPBearer
 from pydantic import BaseModel
 from dotenv import load_dotenv
+import jwt
+import requests
 
 from forex_ai.config.settings import get_settings
 
@@ -57,132 +60,90 @@ def get_supabase_client() -> Client:
 
         # Get Supabase credentials
         supabase_url = os.getenv("SUPABASE_URL", "https://your-project-url.supabase.co")
-        supabase_key = os.getenv("SUPABASE_SERVICE_KEY", "your-supabase-anon-key")
-
+        supabase_key = os.getenv("SUPABASE_SERVICE_KEY", os.getenv("SUPABASE_KEY", "your-supabase-anon-key"))
+        
         logger.info(f"Initializing Supabase client with URL: {supabase_url}")
 
-        # Only attempt to create a real client with valid-looking credentials
-        if (
-            supabase_url != "https://your-project-url.supabase.co"
-            and supabase_key != "your-supabase-anon-key"
-            and "supabase.co" in supabase_url
-        ):
-            return create_client(supabase_url, supabase_key)
-        else:
-            logger.warning(
-                "Using mock Supabase client due to default or invalid credentials"
-            )
-            return _create_mock_client()
+        # Validate credentials
+        if (supabase_url == "https://your-project-url.supabase.co" or 
+            supabase_key == "your-supabase-anon-key" or 
+            "supabase.co" not in supabase_url):
+            logger.critical("Invalid Supabase credentials provided!")
+            raise ValueError("Invalid Supabase credentials. Please set valid SUPABASE_URL and SUPABASE_KEY environment variables.")
+
+        # Create the real client
+        client = create_client(supabase_url, supabase_key)
+        # Just create the client without testing a specific table
+        logger.info("Successfully created Supabase client")
+        return client
     except Exception as e:
-        logger.error(f"Error creating Supabase client: {str(e)}")
-        logger.warning("Falling back to mock Supabase client")
-        return _create_mock_client()
-
-
-def _create_mock_client():
-    """
-    Create a mock Supabase client for development when real credentials aren't available.
-
-    This allows the application to run without a real Supabase instance.
-    """
-
-    # Create a basic mock object that won't throw errors
-    class MockSupabaseClient:
-        def __init__(self):
-            self.auth = MockSupabaseAuth()
-            self.table = lambda name: MockTable(name)
-
-        def from_(self, table_name):
-            return MockTable(table_name)
-
-    class MockSupabaseAuth:
-        def sign_up(self, credentials):
-            return {
-                "user": {
-                    "id": "mock-user-id",
-                    "email": credentials.get("email", "mock@example.com"),
-                }
-            }
-
-        def sign_in(self, credentials):
-            return {
-                "user": {
-                    "id": "mock-user-id",
-                    "email": credentials.get("email", "mock@example.com"),
-                }
-            }
-
-        def sign_out(self):
-            return {"success": True}
-
-    class MockTable:
-        def __init__(self, name):
-            self.name = name
-
-        def select(self, *args, **kwargs):
-            return self
-
-        def insert(self, data, **kwargs):
-            return {"id": "mock-id", **data}
-
-        def update(self, data, **kwargs):
-            return {"id": "mock-id", **data}
-
-        def delete(self, **kwargs):
-            return {"success": True}
-
-        def eq(self, *args, **kwargs):
-            return self
-
-        def execute(self):
-            return {"data": [], "error": None}
-
-    return MockSupabaseClient()
+        logger.critical(f"Failed to create Supabase client: {str(e)}")
+        raise ValueError(f"Failed to connect to Supabase: {str(e)}. Please check your credentials and connection.")
 
 
 async def get_current_user(token: str = Depends(security)) -> Dict[str, Any]:
     """
-    Verify authentication token and return current user.
+    Get the current user from a JWT token.
 
     Args:
-        token: JWT token from HTTP Authorization header
+        token: JWT token
 
     Returns:
-        Dict: User data
+        User data
 
     Raises:
-        HTTPException: If authentication fails
+        HTTPException: If the token is invalid
     """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid authentication credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-
     try:
-        # Get Supabase client
-        supabase = get_supabase_client()
+        # Get settings
+        settings = get_settings()
 
-        # The token.credentials value contains the actual token string
-        # Verify token and get user data
-        user = supabase.auth.get_user(token.credentials)
+        # Decode the token
+        payload = jwt.decode(
+            token.credentials,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
 
-        if user is None:
-            raise credentials_exception
+        # Get user ID from token
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication token",
+            )
 
-        return user.model_dump()
+        # Get user data from Supabase
+        supabase_client = get_supabase_client()
+        response = supabase_client.table("users").select("*").eq("id", user_id).execute()
+
+        # Check if user exists
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+            )
+
+        # Return user data
+        return response.data[0]
+    except jwt.PyJWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+        )
     except Exception as e:
-        logger.error(f"Authentication error: {str(e)}")
-        raise credentials_exception
+        logger.error(f"Error getting current user: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication error",
+        )
 
 
 class SupabaseAuth:
-    """
-    Supabase authentication service.
-    """
+    """Supabase authentication service."""
 
     def __init__(self):
-        """Initialize Supabase auth service."""
+        """Initialize the Supabase auth service."""
         self.client = get_supabase_client()
 
     async def register(self, user_data: UserRegistration) -> AuthResponse:
@@ -193,12 +154,13 @@ class SupabaseAuth:
             user_data: User registration data
 
         Returns:
-            AuthResponse: Authentication response with access token
+            Authentication response with access token
 
         Raises:
             HTTPException: If registration fails
         """
         try:
+            # Check if passwords match
             if user_data.password != user_data.password_confirmation:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -206,20 +168,42 @@ class SupabaseAuth:
                 )
 
             # Register user with Supabase
-            response = self.client.auth.sign_up(
+            response = self.client.auth.sign_up({
+                "email": user_data.email,
+                "password": user_data.password,
+            })
+
+            # Check if registration was successful
+            if not response.get("user"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Registration failed",
+                )
+
+            # Get user data
+            user = response.get("user")
+
+            # Generate JWT token
+            settings = get_settings()
+            access_token = jwt.encode(
                 {
-                    "email": user_data.email,
-                    "password": user_data.password,
-                }
+                    "sub": user.get("id"),
+                    "email": user.get("email"),
+                    "exp": time.time() + settings.JWT_EXPIRE_MINUTES * 60,
+                },
+                settings.JWT_SECRET_KEY,
+                algorithm=settings.JWT_ALGORITHM,
             )
 
-            # Create response
+            # Return authentication response
             return AuthResponse(
-                access_token=response.session.access_token,
-                user=response.user.model_dump(),
+                access_token=access_token,
+                user=user,
             )
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error(f"Registration error: {str(e)}")
+            logger.error(f"Error registering user: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Registration failed: {str(e)}",
@@ -233,30 +217,52 @@ class SupabaseAuth:
             credentials: User credentials
 
         Returns:
-            AuthResponse: Authentication response with access token
+            Authentication response with access token
 
         Raises:
             HTTPException: If login fails
         """
         try:
-            # Login with Supabase
-            response = self.client.auth.sign_in_with_password(
+            # Login user with Supabase
+            response = self.client.auth.sign_in({
+                "email": credentials.email,
+                "password": credentials.password,
+            })
+
+            # Check if login was successful
+            if not response.get("user"):
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid credentials",
+                )
+
+            # Get user data
+            user = response.get("user")
+
+            # Generate JWT token
+            settings = get_settings()
+            access_token = jwt.encode(
                 {
-                    "email": credentials.email,
-                    "password": credentials.password,
-                }
+                    "sub": user.get("id"),
+                    "email": user.get("email"),
+                    "exp": time.time() + settings.JWT_EXPIRE_MINUTES * 60,
+                },
+                settings.JWT_SECRET_KEY,
+                algorithm=settings.JWT_ALGORITHM,
             )
 
-            # Create response
+            # Return authentication response
             return AuthResponse(
-                access_token=response.session.access_token,
-                user=response.user.model_dump(),
+                access_token=access_token,
+                user=user,
             )
+        except HTTPException:
+            raise
         except Exception as e:
-            logger.error(f"Login error: {str(e)}")
+            logger.error(f"Error logging in user: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Authentication failed: {str(e)}",
+                detail=f"Login failed: {str(e)}",
             )
 
     async def logout(self, token: str) -> Dict[str, str]:
@@ -267,23 +273,24 @@ class SupabaseAuth:
             token: JWT token
 
         Returns:
-            Dict: Message confirming logout
+            Success message
 
         Raises:
             HTTPException: If logout fails
         """
         try:
-            # Logout from Supabase
-            self.client.auth.sign_out(token)
+            # Logout user with Supabase
+            response = self.client.auth.sign_out()
 
-            return {"message": "Successfully logged out"}
+            # Return success message
+            return {"message": "Logged out successfully"}
         except Exception as e:
-            logger.error(f"Logout error: {str(e)}")
+            logger.error(f"Error logging out user: {str(e)}")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Logout failed: {str(e)}",
             )
 
 
-# Create a singleton instance
+# Create auth service instance
 auth_service = SupabaseAuth()

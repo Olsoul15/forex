@@ -6,8 +6,9 @@ including WebSocket connections for live price updates.
 """
 
 import logging
+import os
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Any
 
 import pandas as pd
 from oandapyV20 import API
@@ -15,27 +16,72 @@ from oandapyV20.exceptions import V20Error
 from oandapyV20.endpoints.pricing import PricingStream
 from oandapyV20.endpoints.instruments import InstrumentsCandles
 
+from forex_ai.utils.config import get_env_var
+from forex_ai.config.settings import get_settings
+
 logger = logging.getLogger(__name__)
 
 class OandaDataHandler:
     """Handles data fetching and streaming from OANDA."""
     
-    def __init__(self, access_token: str, account_id: str, practice: bool = True):
+    def __init__(self, access_token: Optional[str] = None, account_id: Optional[str] = None, 
+                 practice: bool = True, user_id: Optional[str] = None):
         """
         Initialize OANDA data handler.
         
         Args:
-            access_token: OANDA API access token
-            account_id: OANDA account ID
+            access_token: OANDA API access token (required if user_id not provided)
+            account_id: OANDA account ID (required if user_id not provided)
             practice: Whether to use practice account (default: True)
+            user_id: User ID to load credentials for (required if access_token/account_id not provided)
+            
+        Raises:
+            ValueError: If neither (access_token and account_id) nor user_id is provided
         """
-        self.access_token = access_token
-        self.account_id = account_id
+        # Validate that we have a way to get credentials
+        if not ((access_token and account_id) or user_id):
+            raise ValueError("Either both access_token and account_id, or user_id must be provided")
+        
+        # Use provided credentials or load from database
+        if access_token and account_id:
+            # Use provided credentials
+            self.access_token = access_token
+            self.account_id = account_id
+        elif user_id:
+            # Load credentials from database
+            credentials = self._load_credentials_from_db(user_id)
+            if not credentials:
+                raise ValueError(f"No OANDA credentials found for user {user_id}")
+                
+            self.access_token = credentials.get("access_token", "")
+            self.account_id = credentials.get("account_id", "")
+            practice = credentials.get("environment", "practice").lower() == "practice"
+        
         self.environment = "practice" if practice else "live"
-        self.api = API(access_token=access_token, environment=self.environment)
+        self.api = API(access_token=self.access_token, environment=self.environment)
         self.streams = {}  # Active price streams
         self.callbacks = {}  # Callback functions for data updates
         
+    def _load_credentials_from_db(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Load OANDA credentials from the database.
+        
+        Args:
+            user_id: User ID to load credentials for
+            
+        Returns:
+            Dictionary with credentials or None if not found
+        """
+        try:
+            # Import here to avoid circular imports
+            from forex_ai.backend_api.db import account_db
+            
+            # Get credentials from database
+            return account_db.get_broker_credentials(user_id, "oanda")
+        except Exception as e:
+            logger.error(f"Error loading OANDA credentials from database: {str(e)}")
+            return None
+    
     def fetch_historical_data(
         self,
         pair: str,

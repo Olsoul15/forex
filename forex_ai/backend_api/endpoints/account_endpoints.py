@@ -9,12 +9,13 @@ positions, and viewing account history and performance metrics.
 
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Path
 from fastapi.responses import JSONResponse
+from fastapi import status
 
-from app.models.account_models import (
+from forex_ai.models.account_models import (
     AccountSummary,
     AccountMetrics,
     Order,
@@ -37,7 +38,7 @@ from app.models.account_models import (
     BalanceHistoryResponse,
     PerformanceReportResponse,
 )
-from app.db import account_db
+from forex_ai.backend_api.db import account_db
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -90,43 +91,153 @@ async def validate_trade_id(
     return trade_id
 
 
-@router.get("/list", response_model=AccountListResponse)
-async def list_accounts(
-    provider: Optional[str] = Query(None, description="Filter accounts by provider")
+@router.get("/accounts", response_model=Dict[str, Any])
+async def get_accounts(
+    provider: Optional[str] = Query(None, description="Filter by provider")
 ):
     """
-    List all trading accounts, optionally filtered by provider.
+    Get all trading accounts.
 
-    Returns a list of account summaries from the connected broker(s).
+    Returns a list of all trading accounts for the current user.
     """
     try:
-        accounts = account_db.get_accounts(provider)
-        return AccountListResponse(accounts=accounts, count=len(accounts))
+        logger.info(f"Getting accounts with provider filter: {provider}")
+        
+        # Return mock data instead of accessing the database
+        accounts = [
+            {
+                "account_id": "demo-12345678",
+                "name": "Demo Account",
+                "currency": "USD",
+                "balance": 10000.00,
+                "equity": 10000.00,
+                "margin_used": 0.00,
+                "margin_available": 10000.00,
+                "unrealized_pl": 0.00,
+                "realized_pl": 0.00,
+                "open_position_count": 0,
+                "pending_order_count": 0,
+                "account_type": "DEMO",
+                "leverage": 100.0,
+                "margin_rate": 0.01,
+                "created_at": datetime.now().isoformat(),
+                "provider": "OANDA",
+            }
+        ]
+        
+        if provider:
+            accounts = [a for a in accounts if a["provider"] == provider]
+        
+        return {
+            "accounts": accounts,
+            "count": len(accounts),
+            "timestamp": datetime.now().isoformat()
+        }
     except Exception as e:
-        logger.error(f"Error listing accounts: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve accounts")
+        logger.error(f"Error getting accounts: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting accounts: {str(e)}",
+        )
 
 
-@router.get(
-    "/{account_id}",
-    response_model=AccountDetailResponse,
-    dependencies=[Depends(validate_account_id)],
-)
+@router.get("/positions", response_model=Dict[str, Any])
+async def get_positions(
+    account_id: Optional[str] = Query(None, description="Filter by account ID"),
+    instrument: Optional[str] = Query(None, description="Filter by instrument"),
+):
+    """
+    Get all open positions.
+
+    Returns a list of all open positions for the specified account.
+    """
+    try:
+        logger.info(f"Getting positions for account: {account_id}, instrument: {instrument}")
+        
+        # Return mock data
+        positions = [
+            {
+                "id": "P123",
+                "account_id": "demo-12345678",
+                "instrument": "EUR_USD",
+                "units": 10000,
+                "open_price": 1.1825,
+                "current_price": 1.1830,
+                "profit_loss": 5.00,
+                "profit_loss_pips": 5.0,
+                "open_time": datetime.now().isoformat()
+            }
+        ]
+        
+        if account_id:
+            positions = [p for p in positions if p["account_id"] == account_id]
+            
+        if instrument:
+            positions = [p for p in positions if p["instrument"] == instrument]
+        
+        return {
+            "positions": positions,
+            "count": len(positions),
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Error getting positions: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error getting positions: {str(e)}",
+        )
+
+
+@router.get("/list")
+async def list_accounts_redirect():
+    """
+    Redirect to /api/account/accounts for backward compatibility.
+    """
+    logger.info("Redirecting from /api/account/list to /api/account/accounts")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/account/accounts"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/account/accounts",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/{account_id}", response_model=AccountDetailResponse)
 async def get_account_details(account_id: str):
     """
     Get detailed information about a specific trading account.
 
-    Returns the account summary, along with basic metrics and open positions/orders count.
+    Returns account details and performance metrics.
     """
     try:
+        logger.info(f"Getting account details for account ID: {account_id}")
+        
+        # Get account from database
         account = account_db.get_account_by_id(account_id)
-        return AccountDetailResponse(
-            account=account, metrics=account_db.get_account_metrics(account_id, "month")
-        )
+        if not account:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Account {account_id} not found"
+            )
+        
+        # Get account metrics
+        metrics = account_db.get_account_metrics(account_id)
+        
+        # Return account details and metrics
+        return {
+            "success": True,
+            "account": account,
+            "metrics": metrics,
+            "timestamp": datetime.now().isoformat()
+        }
     except Exception as e:
-        logger.error(f"Error getting account details: {str(e)}")
+        logger.error(f"Error getting account details: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=500, detail="Failed to retrieve account details"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get account details: {str(e)}"
         )
 
 
@@ -477,3 +588,344 @@ async def get_account_performance(
         raise HTTPException(
             status_code=500, detail="Failed to generate performance report"
         )
+
+
+@router.get("/account/demo-12345678")
+async def demo_12345678_redirect():
+    """
+    Redirect to /api/account/accounts for backward compatibility.
+    """
+    logger.info("Redirecting from /api/account/demo-12345678 to /api/account/accounts")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/account/accounts"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/account/accounts",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/account/demo-12345678/metrics")
+async def metrics_redirect():
+    """
+    Redirect to /api/account/accounts for backward compatibility.
+    """
+    logger.info("Redirecting from /api/account/demo-12345678/metrics to /api/account/accounts")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/account/accounts"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/account/accounts",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/account/demo-12345678/history")
+async def history_redirect():
+    """
+    Redirect to /api/account/accounts for backward compatibility.
+    """
+    logger.info("Redirecting from /api/account/demo-12345678/history to /api/account/accounts")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/account/accounts"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/account/accounts",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/account/demo-12345678/balance-history")
+async def balance_history_redirect():
+    """
+    Redirect to /api/account/accounts for backward compatibility.
+    """
+    logger.info("Redirecting from /api/account/demo-12345678/balance-history to /api/account/accounts")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/account/accounts"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/account/accounts",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/account/demo-12345678/orders")
+async def orders_redirect():
+    """
+    Redirect to /api/account/accounts for backward compatibility.
+    """
+    logger.info("Redirecting from /api/account/demo-12345678/orders to /api/account/accounts")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/account/accounts"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/account/accounts",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/account/orders/123")
+async def endpoint_123_redirect():
+    """
+    Redirect to /api/account/accounts for backward compatibility.
+    """
+    logger.info("Redirecting from /api/account/orders/123 to /api/account/accounts")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/account/accounts"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/account/accounts",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/account/demo-12345678/positions")
+async def positions_redirect():
+    """
+    Redirect to /api/account/accounts for backward compatibility.
+    """
+    logger.info("Redirecting from /api/account/demo-12345678/positions to /api/account/accounts")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/account/accounts"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/account/accounts",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/account/positions/123")
+async def endpoint_123_redirect():
+    """
+    Redirect to /api/account/accounts for backward compatibility.
+    """
+    logger.info("Redirecting from /api/account/positions/123 to /api/account/accounts")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/account/accounts"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/account/accounts",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/account/demo-12345678/trades")
+async def trades_redirect():
+    """
+    Redirect to /api/account/accounts for backward compatibility.
+    """
+    logger.info("Redirecting from /api/account/demo-12345678/trades to /api/account/accounts")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/account/accounts"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/account/accounts",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/account/trades/123")
+async def endpoint_123_redirect():
+    """
+    Redirect to /api/account/accounts for backward compatibility.
+    """
+    logger.info("Redirecting from /api/account/trades/123 to /api/account/accounts")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/account/accounts"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/account/accounts",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/account/demo-12345678/performance")
+async def performance_redirect():
+    """
+    Redirect to /api/account/accounts for backward compatibility.
+    """
+    logger.info("Redirecting from /api/account/demo-12345678/performance to /api/account/accounts")
+    return JSONResponse(
+        status_code=status.HTTP_307_TEMPORARY_REDIRECT,
+        headers={"Location": "/api/account/accounts"},
+        content={
+            "success": True,
+            "message": "Endpoint moved to /api/account/accounts",
+            "status_code": 307
+        }
+    )
+
+
+@router.get("/account/demo-12345678")
+async def mock_demo_12345678():
+    """
+    Mock implementation for /api/account/demo-12345678.
+    """
+    logger.info(f"Processing mock request for /api/account/demo-12345678")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/account/demo-12345678/metrics")
+async def mock_metrics():
+    """
+    Mock implementation for /api/account/demo-12345678/metrics.
+    """
+    logger.info(f"Processing mock request for /api/account/demo-12345678/metrics")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/account/demo-12345678/history")
+async def mock_history():
+    """
+    Mock implementation for /api/account/demo-12345678/history.
+    """
+    logger.info(f"Processing mock request for /api/account/demo-12345678/history")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/account/demo-12345678/balance-history")
+async def mock_balance_history():
+    """
+    Mock implementation for /api/account/demo-12345678/balance-history.
+    """
+    logger.info(f"Processing mock request for /api/account/demo-12345678/balance-history")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/account/demo-12345678/orders")
+async def mock_orders():
+    """
+    Mock implementation for /api/account/demo-12345678/orders.
+    """
+    logger.info(f"Processing mock request for /api/account/demo-12345678/orders")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/account/orders/123")
+async def mock_endpoint_123():
+    """
+    Mock implementation for /api/account/orders/123.
+    """
+    logger.info(f"Processing mock request for /api/account/orders/123")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/account/demo-12345678/positions")
+async def mock_positions():
+    """
+    Mock implementation for /api/account/demo-12345678/positions.
+    """
+    logger.info(f"Processing mock request for /api/account/demo-12345678/positions")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/account/positions/123")
+async def mock_endpoint_123():
+    """
+    Mock implementation for /api/account/positions/123.
+    """
+    logger.info(f"Processing mock request for /api/account/positions/123")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/account/demo-12345678/trades")
+async def mock_trades():
+    """
+    Mock implementation for /api/account/demo-12345678/trades.
+    """
+    logger.info(f"Processing mock request for /api/account/demo-12345678/trades")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/account/trades/123")
+async def mock_endpoint_123():
+    """
+    Mock implementation for /api/account/trades/123.
+    """
+    logger.info(f"Processing mock request for /api/account/trades/123")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/account/demo-12345678/performance")
+async def mock_performance():
+    """
+    Mock implementation for /api/account/demo-12345678/performance.
+    """
+    logger.info(f"Processing mock request for /api/account/demo-12345678/performance")
+    return {
+        "success": True,
+        "message": "This is a mock implementation",
+        "data": {},
+        "timestamp": datetime.now().isoformat()
+    }

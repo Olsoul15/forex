@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="60" viewBox="0 0 200 60">
+  <style>
+    .text { font-family: Arial, sans-serif; font-weight: bold; }
+    .primary { fill: #2E3192; }
+    .secondary { fill: #0082CA; }
+  </style>
+  <rect width="200" height="60" fill="white"/>
+  <text x="20" y="40" class="text primary" font-size="36">OANDA</text>
+  <path class="secondary" d="M170 15 L180 15 L180 45 L170 45 Z" />
+  <path class="secondary" d="M185 15 L195 15 L195 45 L185 45 Z" />
+</svg> 

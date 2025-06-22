@@ -22,14 +22,19 @@ from websockets.exceptions import ConnectionClosed, WebSocketException
 from websockets.server import WebSocketServerProtocol
 
 from forex_ai.utils.logging import setup_logging, get_logger
+from forex_ai.utils.config import get_env_var
+from forex_ai.config.settings import get_settings
 
 # Set up logging
 setup_logging()
 logger = get_logger(__name__)
 
+# Get settings
+settings = get_settings()
+
 # Configuration
-OANDA_ACCOUNT_ID = os.environ.get("OANDA_ACCOUNT_ID", "")
-OANDA_ACCESS_TOKEN = os.environ.get("OANDA_ACCESS_TOKEN", "")
+OANDA_ACCOUNT_ID = settings.OANDA_ACCOUNT_ID
+OANDA_ACCESS_TOKEN = get_env_var("OANDA_ACCESS_TOKEN", fallback_keys=["OANDA_API_KEY"], default=settings.OANDA_ACCESS_TOKEN)
 OANDA_WS_URL = "wss://stream-fxtrade.oanda.com/v3/accounts/{}/pricing/stream"
 DEFAULT_PORT = 8080
 MAX_RECONNECT_ATTEMPTS = 5
@@ -39,11 +44,18 @@ INITIAL_RECONNECT_DELAY = 1
 class OandaProxyServer:
     """Proxy server for OANDA WebSocket connections."""
 
-    def __init__(self, port: int = DEFAULT_PORT):
+    def __init__(self, port: int = DEFAULT_PORT, user_id: Optional[str] = None, 
+                 access_token: Optional[str] = None, account_id: Optional[str] = None):
         """Initialize the proxy server.
 
         Args:
             port: Port to listen on
+            user_id: User ID to load credentials for (required if access_token/account_id not provided)
+            access_token: OANDA API access token (required if user_id not provided)
+            account_id: OANDA account ID (required if user_id not provided)
+            
+        Raises:
+            ValueError: If neither (access_token and account_id) nor user_id is provided
         """
         self.port = port
         self.clients: Set[WebSocketServerProtocol] = set()
@@ -59,6 +71,44 @@ class OandaProxyServer:
             "errors": 0,
             "start_time": time.time(),
         }
+        
+        # Validate that we have a way to get credentials
+        if not ((access_token and account_id) or user_id):
+            raise ValueError("Either both access_token and account_id, or user_id must be provided")
+        
+        # Use provided credentials or load from database
+        if access_token and account_id:
+            # Use provided credentials
+            self.access_token = access_token
+            self.account_id = account_id
+        elif user_id:
+            # Load credentials from database
+            credentials = self._load_credentials_from_db(user_id)
+            if not credentials:
+                raise ValueError(f"No OANDA credentials found for user {user_id}")
+                
+            self.access_token = credentials.get("access_token", "")
+            self.account_id = credentials.get("account_id", "")
+    
+    def _load_credentials_from_db(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Load OANDA credentials from the database.
+        
+        Args:
+            user_id: User ID to load credentials for
+            
+        Returns:
+            Dictionary with credentials or None if not found
+        """
+        try:
+            # Import here to avoid circular imports
+            from forex_ai.backend_api.db import account_db
+            
+            # Get credentials from database
+            return account_db.get_broker_credentials(user_id, "oanda")
+        except Exception as e:
+            logger.error(f"Error loading OANDA credentials from database: {str(e)}")
+            return None
 
     async def start(self):
         """Start the proxy server."""
@@ -152,14 +202,14 @@ class OandaProxyServer:
         Returns:
             bool: True if connection successful, False otherwise
         """
-        if not OANDA_ACCOUNT_ID or not OANDA_ACCESS_TOKEN:
+        if not self.account_id or not self.access_token:
             logger.error("OANDA credentials not configured")
             return False
 
         try:
             # Build connection URL
-            url = OANDA_WS_URL.format(OANDA_ACCOUNT_ID)
-            headers = {"Authorization": f"Bearer {OANDA_ACCESS_TOKEN}"}
+            url = OANDA_WS_URL.format(self.account_id)
+            headers = {"Authorization": f"Bearer {self.access_token}"}
 
             # Connect to OANDA
             logger.info("Connecting to OANDA WebSocket")

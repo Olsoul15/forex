@@ -1,12 +1,23 @@
 """
-Workflow automation components for the Forex AI Trading System.
+Automation module for the Forex AI Trading System.
 
-This package provides workflow automation tools, including:
-- N8N integration for workflow management
-- Predefined workflows for data collection, alerts, reporting, and YouTube processing
+This module provides a custom workflow engine to replace N8N for task automation.
 """
 
-# Import public interfaces from submodules
-# These will be implemented in later phases
+from forex_ai.automation.engine import (
+    TaskStatus,
+    TaskDefinition,
+    TaskResult,
+    Workflow,
+    WorkflowEngine,
+    get_workflow_engine,
+)
 
-__all__ = []
+__all__ = [
+    'TaskStatus',
+    'TaskDefinition',
+    'TaskResult',
+    'Workflow',
+    'WorkflowEngine',
+    'get_workflow_engine',
+]

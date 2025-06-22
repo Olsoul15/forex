@@ -4,8 +4,15 @@
 """
 Simple OANDA WebSocket connection test.
 
-This script provides a minimal test of the OANDA WebSocket connection,
-focusing only on establishing the connection and receiving price data.
+This script is for DEVELOPMENT USE ONLY. It provides a minimal test of the OANDA 
+WebSocket connection, focusing only on establishing the connection and receiving price data.
+
+Required environment variables:
+- OANDA_ACCESS_TOKEN or OANDA_API_KEY
+- OANDA_ACCOUNT_ID
+
+WARNING: This script should never be used in production. In production,
+credentials should always come from the database/API.
 """
 
 import asyncio
@@ -23,34 +30,63 @@ if project_root not in sys.path:
 import websockets
 from websockets.exceptions import ConnectionClosed, WebSocketException
 
-# Configure logging
-import logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+from forex_ai.utils.logging import setup_logging, get_logger
 
-# Configuration
-OANDA_ACCOUNT_ID = os.environ.get("OANDA_ACCOUNT_ID", "")
-OANDA_ACCESS_TOKEN = "f1086a5e2c1718a39aa9c8dd0c38f5c9-0329c78b1d1cc274a149ff4151365df0"  # Using the key from basic_oanda_test.py
-OANDA_WS_URL = "wss://stream-fxpractice.oanda.com/v3/accounts/{}/pricing/stream"  # Using practice environment
+# Set up logging
+setup_logging()
+logger = get_logger(__name__)
+
+# OANDA WebSocket URL (practice environment)
+OANDA_WS_URL = "wss://stream-fxpractice.oanda.com/v3/accounts/{}/pricing/stream"
 INSTRUMENTS = ["EUR_USD", "GBP_USD", "USD_JPY"]
 TEST_DURATION = 30  # seconds
 
 
-async def connect_to_oanda():
-    """Connect to OANDA WebSocket and stream price data."""
-    if not OANDA_ACCOUNT_ID or not OANDA_ACCESS_TOKEN:
-        logger.error("OANDA credentials not configured")
-        logger.error("Please set OANDA_ACCOUNT_ID and OANDA_ACCESS_TOKEN environment variables")
-        return False
+def get_oanda_credentials():
+    """
+    Get OANDA credentials from environment variables.
+    
+    Returns:
+        tuple: (access_token, account_id) or (None, None) if not found
+        
+    Raises:
+        SystemExit: If required environment variables are not set
+    """
+    logger.warning("DEVELOPMENT MODE: Using environment variables for OANDA credentials")
+    
+    # Check for required environment variables
+    access_token = os.environ.get("OANDA_ACCESS_TOKEN") or os.environ.get("OANDA_API_KEY")
+    account_id = os.environ.get("OANDA_ACCOUNT_ID")
+    
+    if not access_token:
+        logger.error("Neither OANDA_ACCESS_TOKEN nor OANDA_API_KEY environment variable is set")
+        print("Error: OANDA_ACCESS_TOKEN or OANDA_API_KEY environment variable must be set")
+        return None, None
+        
+    if not account_id:
+        logger.error("OANDA_ACCOUNT_ID environment variable not set")
+        print("Error: OANDA_ACCOUNT_ID environment variable must be set")
+        return None, None
+        
+    return access_token, account_id
 
+
+async def connect_to_oanda(access_token, account_id):
+    """
+    Connect to OANDA WebSocket and stream price data.
+    
+    Args:
+        access_token: OANDA API access token
+        account_id: OANDA account ID
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
     try:
         # Build connection URL
-        url = OANDA_WS_URL.format(OANDA_ACCOUNT_ID)
+        url = OANDA_WS_URL.format(account_id)
         logger.info(f"Constructed WebSocket URL: {url}")
-        headers = {"Authorization": f"Bearer {OANDA_ACCESS_TOKEN}"}
+        headers = {"Authorization": f"Bearer {access_token}"}
 
         logger.info(f"Connecting to OANDA WebSocket at {url}")
         logger.info(f"Monitoring instruments: {', '.join(INSTRUMENTS)}")
@@ -58,7 +94,7 @@ async def connect_to_oanda():
         # Create connection with proper headers
         async with websockets.connect(
             url,
-            additional_headers={"Authorization": f"Bearer {OANDA_ACCESS_TOKEN}"}
+            additional_headers={"Authorization": f"Bearer {access_token}"}
         ) as websocket:
             logger.info("Successfully connected to OANDA WebSocket")
 
@@ -127,10 +163,18 @@ async def connect_to_oanda():
 
 async def main():
     """Main entry point."""
-    logger.info("Starting simple OANDA WebSocket test")
+    logger.info("Starting simple OANDA WebSocket test (DEVELOPMENT USE ONLY)")
+    
+    # Get OANDA credentials
+    access_token, account_id = get_oanda_credentials()
+    if not access_token or not account_id:
+        sys.exit(1)
+    
+    logger.info(f"Using access token: {access_token[:5]}...{access_token[-5:]}")
+    logger.info(f"Using account ID: {account_id}")
     
     try:
-        success = await connect_to_oanda()
+        success = await connect_to_oanda(access_token, account_id)
         if not success:
             sys.exit(1)
     except KeyboardInterrupt:

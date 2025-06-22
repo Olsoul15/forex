@@ -1,62 +1,44 @@
 """
-Data management components for the Forex AI Trading System.
+Data module for the Forex AI Trading System.
 
-This package includes modules for:
-- Market data connectors (TradingView, Alpha Vantage)
-- News and sentiment analysis (News APIs, YouTube)
-- Data storage (PostgreSQL, Redis)
-- Data processing pipelines
+This module provides data management functionality for the Forex AI Trading System,
+including market data acquisition, storage, and preprocessing.
 """
 
-# Import main components
-from forex_ai.data.connectors import (
-    # TradingViewConnector, # Removed as the module doesn't exist
-    AlphaVantageConnector,
-    NewsApiConnector,
-    YouTubeConnector,
+from forex_ai.data.data_manager import DataManager
+# Import what's available from market_data
+# from forex_ai.data.market_data import (
+#     get_market_data,
+#     save_market_data,
+#     get_historical_data,
+# )
+from forex_ai.data.storage.supabase_client import (
+    SupabaseClient,
+    get_supabase_db_client,
 )
-
-from forex_ai.data.storage import (
-    PostgresClient,
-    get_postgres_client,
+from forex_ai.data.storage.redis_client import (
     RedisClient,
     get_redis_client,
 )
+from forex_ai.data.connectors.base import BaseConnector
+from forex_ai.data.connectors.alpha_vantage import AlphaVantageConnector
+from forex_ai.data.connectors.news_api import NewsApiConnector
+from forex_ai.data.connectors.oanda_handler import OandaDataHandler
+from forex_ai.data.connectors.realtime_data import RealtimeDataConnector
 
-# Import from pipelines
-from forex_ai.data.pipelines.market_data import (
-    fetch_market_data,
-    import_from_csv,
-    export_to_csv,
-    export_to_json,
-    export_to_excel,
-    convert_timeframe,
-    merge_data_sources,
-    normalize_data,
-    export_trade_history
-)
-
+# Export public interfaces
 __all__ = [
-    # Data connectors
-    # 'TradingViewConnector', # Removed as the module doesn't exist
-    'AlphaVantageConnector',
-    'NewsApiConnector',
-    'YouTubeConnector',
-    
-    # Storage clients
-    'PostgresClient',
-    'get_postgres_client',
+    'DataManager',
+    # 'get_market_data',
+    # 'save_market_data',
+    # 'get_historical_data',
+    'SupabaseClient',
+    'get_supabase_db_client',
     'RedisClient',
     'get_redis_client',
-    
-    # Pipelines
-    "fetch_market_data",
-    "import_from_csv",
-    "export_to_csv",
-    "export_to_json",
-    "export_to_excel",
-    "convert_timeframe",
-    "merge_data_sources",
-    "normalize_data",
-    "export_trade_history"
+    'BaseConnector',
+    'AlphaVantageConnector',
+    'NewsApiConnector',
+    'OandaDataHandler',
+    'RealtimeDataConnector',
 ] 

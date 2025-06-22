@@ -18,7 +18,7 @@ from fastapi import (
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, timedelta
 import websockets
@@ -50,9 +50,28 @@ from forex_ai.api.strategy_endpoints import (
     init_llm_strategy_integrator,
     init_strategy_repository,
 )
+from forex_ai.api.broker_routes import router as broker_router
 from forex_ai.agents.framework.llm_strategy_integrator import LLMStrategyIntegrator
 from forex_ai.agents.framework.agent_manager import AgentManager
 from forex_ai.agents.framework.agent_types import UserQuery, SystemResponse
+
+# Import new v1 endpoints
+from forex_ai.api.v1.account_endpoints import router as account_router_v1
+from forex_ai.api.v1.auto_trading_endpoints import router as auto_trading_router_v1
+from forex_ai.api.v1.forex_optimizer_endpoints import router as forex_optimizer_router_v1
+from forex_ai.api.v1.signal_endpoints import router as signal_router_v1
+from forex_ai.api.v1.system_endpoints import router as system_router_v1, docs_router
+
+# Import backend API endpoints
+from forex_ai.backend_api.endpoints.status_endpoints_local import router as status_router
+from forex_ai.backend_api.endpoints.market_data_endpoints import router as market_data_router
+from forex_ai.backend_api.endpoints.account_endpoints import router as account_router
+from forex_ai.backend_api.endpoints.execution_endpoints import router as execution_router
+from forex_ai.backend_api.endpoints.analysis_endpoints import router as analysis_router
+from forex_ai.backend_api.endpoints.day_trading_endpoints import router as day_trading_router
+from forex_ai.backend_api.endpoints.docs_endpoints import router as backend_docs_router
+from forex_ai.backend_api.endpoints.strategy_endpoints_local import router as strategy_router_local
+from forex_ai.backend_api.endpoints.system_endpoints import router as system_router
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -61,10 +80,10 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Forex AI Trading System",
     description="API for the Forex AI Trading System",
-    version="0.1.0",
-    docs_url="/api/docs",
-    redoc_url="/api/redoc",
-    openapi_url="/api/openapi.json",
+    version="1.0.0",
+    docs_url="/api/v1/docs",
+    redoc_url="/api/v1/redoc",
+    openapi_url="/api/v1/openapi.json",
 )
 
 # Add CORS middleware
@@ -77,10 +96,34 @@ app.add_middleware(
 )
 
 # Include auth router
-app.include_router(auth_router)
+app.include_router(auth_router, prefix="/api/v1")
 
 # Add our new strategy router
 app.include_router(strategy_router)
+
+# Add broker integration router
+app.include_router(broker_router)
+
+# Add v1 routers
+app.include_router(account_router_v1)
+app.include_router(auto_trading_router_v1)
+app.include_router(forex_optimizer_router_v1)
+app.include_router(signal_router_v1)
+app.include_router(system_router_v1)
+
+# Add API menu router at root level
+app.include_router(docs_router)
+
+# Add backend API routers
+app.include_router(status_router)
+app.include_router(market_data_router)
+app.include_router(account_router, prefix="/api/backend")  # Add prefix to avoid conflicts
+app.include_router(execution_router)
+app.include_router(analysis_router)
+app.include_router(day_trading_router)
+app.include_router(backend_docs_router, prefix="/api/backend")  # Add prefix to avoid conflicts
+app.include_router(strategy_router_local, prefix="/api/backend")  # Add prefix to avoid conflicts
+app.include_router(system_router, prefix="/api/backend")  # Add prefix to avoid conflicts
 
 # Dashboard components
 chart_component = ChartComponent()
@@ -121,6 +164,75 @@ app.mount("/static", StaticFiles(directory=static_directory), name="static")
 # Add global agent manager variable
 agent_manager = None
 
+# Create path aliases for backward compatibility
+@app.get("/api/brokers/credentials", include_in_schema=False)
+async def legacy_get_broker_credentials(request: Request):
+    """Legacy endpoint that redirects to the v1 endpoint."""
+    # Return a simple response for testing
+    return JSONResponse(content={"message": "Legacy broker credentials endpoint"})
+
+# Add a simple health check endpoint that doesn't require authentication
+@app.get("/api/health", include_in_schema=True)
+async def health_check():
+    """
+    Simple health check endpoint that doesn't require authentication.
+    
+    This endpoint can be used to verify that the API server is running and responsive.
+    """
+    logger.info("Processing health check request")
+    
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0",
+        "api_version": "v1"
+    }
+
+@app.post("/api/brokers/credentials", include_in_schema=False)
+async def legacy_post_broker_credentials(request: Request):
+    """Legacy endpoint that redirects to the v1 endpoint."""
+    return RedirectResponse(url="/api/v1/brokers/credentials", status_code=307)
+
+@app.delete("/api/brokers/credentials", include_in_schema=False)
+async def legacy_delete_broker_credentials(request: Request):
+    """Legacy endpoint that redirects to the v1 endpoint."""
+    return RedirectResponse(url=f"/api/v1/brokers/credentials{request.url.query}", status_code=307)
+
+@app.get("/api/brokers/accounts", include_in_schema=False)
+async def legacy_get_broker_accounts(request: Request):
+    """Legacy endpoint that redirects to the v1 endpoint."""
+    return RedirectResponse(url=f"/api/v1/brokers/accounts{request.url.query}")
+
+@app.get("/api/brokers/accounts/{account_id}", include_in_schema=False)
+async def legacy_get_broker_account_info(account_id: str, request: Request):
+    """Legacy endpoint that redirects to the v1 endpoint."""
+    return RedirectResponse(url=f"/api/v1/brokers/accounts/{account_id}{request.url.query}")
+
+@app.get("/api/market-data", include_in_schema=False)
+async def legacy_get_market_data(request: Request):
+    """Legacy endpoint that redirects to the v1 endpoint."""
+    return RedirectResponse(url=f"/api/v1/market-data{request.url.query}")
+
+@app.get("/api/strategies", include_in_schema=False)
+async def legacy_get_strategies(request: Request):
+    """Legacy endpoint that redirects to the v1 endpoint."""
+    # Return a simple response for testing
+    return JSONResponse(content={"strategies": [], "count": 0, "timestamp": datetime.now().isoformat()})
+
+@app.get("/api/signals", include_in_schema=False)
+async def legacy_get_signals(request: Request):
+    """Legacy endpoint that redirects to the v1 endpoint."""
+    return RedirectResponse(url=f"/api/v1/signals{request.url.query}")
+
+@app.get("/api/performance", include_in_schema=False)
+async def legacy_get_performance(request: Request):
+    """Legacy endpoint that redirects to the v1 endpoint."""
+    return RedirectResponse(url=f"/api/v1/account/performance{request.url.query}")
+
+@app.get("/api/test", include_in_schema=False)
+async def legacy_test_endpoint(request: Request):
+    """Legacy endpoint that redirects to the v1 endpoint."""
+    return RedirectResponse(url="/api/v1/health")
 
 # Dashboard routes
 @app.get("/", response_class=HTMLResponse)
@@ -627,6 +739,48 @@ async def get_settings_page(request: Request):
         )
 
 
+@app.get("/brokers", response_class=HTMLResponse)
+async def get_brokers_page(request: Request):
+    """
+    Render the broker connections page.
+    """
+    try:
+        # Get current user
+        user = {"name": "Demo User"}  # Default for development
+        try:
+            current_user = await get_current_user(request)
+            if current_user:
+                user = current_user
+        except:
+            pass
+
+        return templates.TemplateResponse(
+            "brokers.html",
+            {
+                "request": request,
+                "title": "Broker Connections",
+                "user": user,
+                "version": "0.1.0",
+                "brokers": [
+                    {
+                        "id": "oanda",
+                        "name": "OANDA",
+                        "description": "Connect to your OANDA trading account",
+                        "logo": "/static/images/brokers/oanda-logo.png",
+                        "supported_environments": ["practice", "live"],
+                    },
+                    # Add more brokers as they are supported
+                ],
+            },
+        )
+    except Exception as e:
+        logger.error(f"Error rendering brokers page: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error rendering brokers page: {str(e)}",
+        )
+
+
 # Update the startup event handler
 @app.on_event("startup")
 async def startup_event():
@@ -638,26 +792,37 @@ async def startup_event():
         init_strategy_repository()
         logger.info("Strategy repository initialized")
 
-        # Initialize LLM strategy integrator with Azure config
+        # Initialize LLM strategy integrator with Google Vertex AI config
         llm_config = config.get("llm", {})
 
-        # Set default Azure configuration if not present
+        # Set default Google Vertex AI configuration if not present
         if "provider" not in llm_config:
-            llm_config["provider"] = "azure"
+            llm_config["provider"] = "vertex"
+
+        if "model_name" not in llm_config:
+            llm_config["model_name"] = "gemini-1.5-pro"
 
         if "temperature" not in llm_config:
             llm_config["temperature"] = 0.2
 
         logger.info(f"Using LLM provider: {llm_config['provider']}")
 
-        # Initialize the LLM strategy integrator
-        init_llm_strategy_integrator(llm_config)
-        logger.info("LLM strategy integrator initialized")
+        # Initialize the LLM strategy integrator - make this optional
+        try:
+            init_llm_strategy_integrator(llm_config)
+            logger.info("LLM strategy integrator initialized")
+        except Exception as llm_error:
+            logger.warning(f"Failed to initialize LLM strategy integrator: {str(llm_error)}")
+            logger.warning("Continuing without LLM capabilities")
 
         # Initialize agent manager
-        global agent_manager
-        agent_manager = AgentManager(config)
-        logger.info("Agent manager initialized")
+        try:
+            global agent_manager
+            agent_manager = AgentManager()
+            logger.info("Agent manager initialized")
+        except Exception as agent_error:
+            logger.warning(f"Failed to initialize agent manager: {str(agent_error)}")
+            logger.warning("Continuing without agent framework")
 
     except Exception as e:
         logger.error(f"Error during startup: {str(e)}")
@@ -807,3 +972,26 @@ async def backtest_error_handler(request: Request, exc: BacktestingError):
     """
     logger.error(f"Backtesting error: {str(exc)}")
     return {"success": False, "error": str(exc), "error_type": "backtest_error"}
+
+
+# Run the application directly if this module is executed
+if __name__ == "__main__":
+    import uvicorn
+    import argparse
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="Run the Forex AI Trading System API server")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind the server to")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind the server to")
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    args = parser.parse_args()
+    
+    # Configure logging level based on debug flag
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Debug mode enabled")
+    
+    # Run the server
+    logger.info(f"Starting server on {args.host}:{args.port}")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")

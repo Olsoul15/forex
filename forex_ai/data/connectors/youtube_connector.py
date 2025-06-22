@@ -18,7 +18,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from forex_ai.config.settings import get_settings
 from forex_ai.exceptions import DataSourceError
 from forex_ai.models.llm_controller import LLMController
-from google.cloud.aiplatform.generative_models import GenerativeModel
+from forex_ai.models.mcp import get_mcp_agent
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ class YouTubeConnector:
     This connector provides methods to extract and analyze
     financial content from YouTube videos. It downloads audio,
     transcribes it using Whisper, and analyzes the content
-    using a Google Vertex AI model.
+    using the MCP agent.
     """
 
     def __init__(self, model_size: str = "base"):
@@ -43,6 +43,7 @@ class YouTubeConnector:
         self.model_size = model_size
         self._whisper_model = None
         self.llm_controller = LLMController()
+        self.mcp_agent = get_mcp_agent()
 
     def _get_whisper_model(self):
         """Load the Whisper model."""
@@ -89,18 +90,33 @@ class YouTubeConnector:
             logger.error(error_msg)
             raise DataSourceError(error_msg) from e
 
-    def summarize_transcript(self, transcript: str) -> str:
-        """Summarizes the given transcript using Google's Vertex AI."""
-        client = self.llm_controller.get_client()
-        if not client:
-            return "Error: Vertex AI client not initialized."
+    async def summarize_transcript(self, transcript: str) -> str:
+        """Summarizes the given transcript using the MCP agent."""
         try:
-            model = GenerativeModel("gemini-1.0-pro")
-            prompt = f"Please summarize the following transcript from a financial news video. Focus on the key market insights, sentiment, and any mention of currency pairs or economic events. Keep the summary concise and to the point.\n\nTranscript:\n{transcript}"
-            response = model.generate_content(prompt)
-            return response.text
+            logger.info("Summarizing transcript using MCP agent")
+            
+            from forex_ai.models.mcp import Message, MessageRole
+            
+            messages = [
+                Message(
+                    role=MessageRole.SYSTEM,
+                    content="You are a financial analyst specializing in forex trading. Summarize the following transcript from a financial news video. Focus on the key market insights, sentiment, and any mention of currency pairs or economic events. Keep the summary concise and to the point."
+                ),
+                Message(
+                    role=MessageRole.USER,
+                    content=f"Transcript:\n{transcript}"
+                )
+            ]
+            
+            response = await self.mcp_agent.ask(messages=messages)
+            
+            if not response.success:
+                logger.error(f"MCP agent failed to summarize transcript: {response.error_message}")
+                return f"Error: Could not summarize transcript. Details: {response.error_message}"
+                
+            return response.content or "No summary generated."
         except Exception as e:
-            logger.error(f"Failed to summarize transcript with Vertex AI: {e}")
+            logger.error(f"Failed to summarize transcript: {e}")
             return f"Error: Could not summarize transcript. Details: {e}"
 
     def extract_currency_pairs(self, text: str) -> List[str]:
@@ -109,33 +125,52 @@ class YouTubeConnector:
         pairs = re.findall(pattern, text)
         return list(set(pairs))
 
-    def extract_sentiment(self, summary: str) -> Dict[str, Any]:
-        """Extract sentiment and key information from a summary using Vertex AI."""
-        client = self.llm_controller.get_client()
-        if not client:
-            return {"error": "Vertex AI client not initialized."}
-            
+    async def extract_sentiment(self, summary: str) -> Dict[str, Any]:
+        """Extract sentiment and key information from a summary using the MCP agent."""
         try:
-            logger.info("Extracting sentiment from summary using Vertex AI")
-            model = GenerativeModel("gemini-1.0-pro")
-            system_message = """
-            You are a financial sentiment analyzer specializing in forex trading content.
-            Analyze the provided summary of a YouTube video and return a JSON object with:
-            1. 'sentiment_score': a float from -1.0 (bearish) to 1.0 (bullish).
-            2. 'currency_pairs': a list of any currency pairs mentioned.
-            3. 'key_topics': a list of key topics discussed.
-            4. 'trade_setups': a list of trade setups or strategies mentioned.
-            5. 'economic_events': a list of economic events or indicators.
-            6. 'market_outlook': a short text description of the market outlook.
-            Return only valid JSON.
-            """
-            prompt = f"{system_message}\n\nSummary:\n{summary}"
-            response = model.generate_content(prompt)
+            logger.info("Extracting sentiment from summary using MCP agent")
+            
+            from forex_ai.models.mcp import Message, MessageRole
+            
+            messages = [
+                Message(
+                    role=MessageRole.SYSTEM,
+                    content="""
+                    You are a financial sentiment analyzer specializing in forex trading content.
+                    Analyze the provided summary of a YouTube video and return a JSON object with:
+                    1. 'sentiment_score': a float from -1.0 (bearish) to 1.0 (bullish).
+                    2. 'currency_pairs': a list of any currency pairs mentioned.
+                    3. 'key_topics': a list of key topics discussed.
+                    4. 'trade_setups': a list of trade setups or strategies mentioned.
+                    5. 'economic_events': a list of economic events or indicators.
+                    6. 'market_outlook': a short text description of the market outlook.
+                    Return only valid JSON.
+                    """
+                ),
+                Message(
+                    role=MessageRole.USER,
+                    content=f"Summary:\n{summary}"
+                )
+            ]
+            
+            response = await self.mcp_agent.ask(messages=messages)
+            
+            if not response.success:
+                logger.error(f"MCP agent failed to extract sentiment: {response.error_message}")
+                return {"error": f"Failed to extract sentiment: {response.error_message}"}
+            
             # Clean the response to ensure it's valid JSON
-            clean_response = response.text.strip().replace("```json", "").replace("```", "")
-            return json.loads(clean_response)
+            content = response.content or "{}"
+            clean_response = content.strip().replace("```json", "").replace("```", "")
+            
+            try:
+                return json.loads(clean_response)
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing JSON response: {e}")
+                return {"error": f"Failed to parse sentiment data: {e}"}
+                
         except Exception as e:
-            logger.error(f"Error extracting sentiment with Vertex AI: {e}")
+            logger.error(f"Error extracting sentiment: {e}")
             return {"error": f"Failed to extract sentiment: {e}"}
 
     def get_video_metadata(self, video_url: str) -> Dict[str, Any]:
@@ -155,7 +190,7 @@ class YouTubeConnector:
             logger.error(f"Error getting video metadata for {video_url}: {e}")
             return {"error": str(e)}
 
-    def process_video(self, video_url: str, cleanup_files: bool = True) -> Dict[str, Any]:
+    async def process_video(self, video_url: str, cleanup_files: bool = True) -> Dict[str, Any]:
         """
         Fully processes a YouTube video: download, transcribe, summarize, and analyze.
         """
@@ -171,11 +206,11 @@ class YouTubeConnector:
             if not transcript:
                 return {"error": "Transcription failed or produced no content.", **metadata}
                 
-            summary = self.summarize_transcript(transcript)
+            summary = await self.summarize_transcript(transcript)
             if summary.startswith("Error:"):
                 return {"error": "Summarization failed.", **metadata}
 
-            sentiment_data = self.extract_sentiment(summary)
+            sentiment_data = await self.extract_sentiment(summary)
             if "error" in sentiment_data:
                  return {"error": "Sentiment analysis failed.", **metadata}
 
@@ -196,7 +231,7 @@ class YouTubeConnector:
                 os.remove(audio_path)
                 logger.info(f"Cleaned up audio file: {audio_path}")
                 
-    def batch_process_videos(self, video_urls: List[str], **kwargs) -> List[Dict[str, Any]]:
+    async def batch_process_videos(self, video_urls: List[str], **kwargs) -> List[Dict[str, Any]]:
         """
         Process a batch of YouTube videos.
         
@@ -210,7 +245,7 @@ class YouTubeConnector:
         results = []
         for url in video_urls:
             try:
-                result = self.process_video(url, **kwargs)
+                result = await self.process_video(url, **kwargs)
                 results.append(result)
             except Exception as e:
                 results.append({"video_url": url, "error": str(e)})
@@ -229,7 +264,7 @@ class YouTubeConnector:
         Note: This is a placeholder for a more robust database query.
         This implementation is for demonstration and will be inefficient on large datasets.
         """
-        # This is where you would typically query your database (e.g., Supabase/Postgres)
+        # This is where you would typically query your database (e.g., Supabase)
         # For now, we are not implementing this part as it depends on the DB schema.
         logger.warning("search_videos_by_sentiment is a placeholder and not implemented.")
         return [] 
