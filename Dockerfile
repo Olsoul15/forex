@@ -32,7 +32,7 @@ RUN curl -L -o /tmp/ta-lib-0.4.0-src.tar.gz http://prdownloads.sourceforge.net/t
     && rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
 
 # Install sse-starlette first
-RUN pip install --no-cache-dir sse-starlette>=1.6.5
+RUN pip install --no-cache-dir --no-deps sse-starlette>=1.6.5
 
 # Copy requirements and install dependencies
 COPY requirements.txt .
@@ -74,7 +74,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 # Install sse-starlette first
-RUN pip install --no-cache-dir sse-starlette>=1.6.5
+RUN pip install --no-cache-dir --no-deps sse-starlette>=1.6.5
 
 # Copy application code and dependencies
 COPY --from=builder /app /app
