@@ -31,9 +31,10 @@ RUN curl -L -o /tmp/ta-lib-0.4.0-src.tar.gz http://prdownloads.sourceforge.net/t
     && cd .. \
     && rm -rf ta-lib ta-lib-0.4.0-src.tar.gz
 
-# Install Python dependencies
+# Copy requirements and install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir uvicorn fastapi gunicorn
 
 # Final stage
 FROM python:3.11-slim
@@ -68,8 +69,7 @@ RUN apt-get update \
 
 # Copy requirements and install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir uvicorn fastapi gunicorn sse-starlette
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy Python packages and application code
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
