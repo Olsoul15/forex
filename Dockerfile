@@ -89,16 +89,14 @@ RUN mkdir -p /app/forex_ai/logs && \
 USER appuser
 
 # Create a healthcheck script
-# COPY --chown=appuser:appuser healthcheck.py /app/healthcheck.py
-# RUN chmod +x /app/healthcheck.py
-
-# Add healthcheck
-# HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-#     CMD python /app/healthcheck.py
+# The debug server will respond to this
+HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=5 \
+  CMD curl --fail http://localhost:8000/ || exit 1
 
 # Expose port
 EXPOSE 8000
 
-# Start the application with a command that does not exit
-# This allows us to exec into the container for debugging
-CMD ["tail", "-f", "/dev/null"]
+# Start the debug server
+# We will manually run the real application after exec-ing into the container
+COPY --chown=appuser:appuser debug_server.py /app/debug_server.py
+CMD ["python", "debug_server.py"]
