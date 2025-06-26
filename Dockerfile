@@ -99,5 +99,6 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 # Expose port
 EXPOSE 8000
 
-# Start the application with our run.py script
-CMD ["python", "run.py"]
+# Start the application with a command that does not exit
+# This allows us to exec into the container for debugging
+CMD ["tail", "-f", "/dev/null"]
