@@ -89,12 +89,12 @@ RUN mkdir -p /app/forex_ai/logs && \
 USER appuser
 
 # Create a healthcheck script
-COPY --chown=appuser:appuser healthcheck.py /app/healthcheck.py
-RUN chmod +x /app/healthcheck.py
+# COPY --chown=appuser:appuser healthcheck.py /app/healthcheck.py
+# RUN chmod +x /app/healthcheck.py
 
 # Add healthcheck
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD python /app/healthcheck.py
+# HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
+#     CMD python /app/healthcheck.py
 
 # Expose port
 EXPOSE 8000
