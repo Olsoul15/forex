@@ -96,7 +96,5 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=5 \
 # Expose port
 EXPOSE 8000
 
-# Start the debug server
-# We will manually run the real application after exec-ing into the container
-COPY --chown=appuser:appuser debug_server.py /app/debug_server.py
-CMD ["python", "debug_server.py"]
+# Start the application. If it fails, log the error and tail the log file.
+CMD ["sh", "-c", "python run.py || tail -f /app/forex_ai/logs/startup_error.log"]
