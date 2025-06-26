@@ -75,9 +75,10 @@ RUN apt-get update \
 COPY --from=builder /app /app
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 
-# Create non-root user
+# Create non-root user and set permissions
 RUN adduser --disabled-password --gecos "" appuser \
-    && chown -R appuser:appuser /app
+    && chown -R appuser:appuser /app \
+    && chown -R appuser:appuser /usr/local/lib/python3.11/site-packages
 
 # Create logs directory with proper permissions
 RUN mkdir -p /app/forex_ai/logs && \
