@@ -66,67 +66,47 @@ def get_supabase_client() -> Optional[Client]:
 
 async def get_current_user(token: str = Depends(security)) -> Dict[str, Any]:
     """
-    Get the current user from a JWT token.
+    Get the current user from a JWT token by validating it with Supabase.
 
     Args:
-        token: JWT token
+        token: JWT token from the Authorization header
 
     Returns:
-        User data
+        User data from Supabase
 
     Raises:
         HTTPException: If the token is invalid or authentication is disabled
     """
-    try:
-        # Get settings
-        settings = get_settings()
-
-        # Check if authentication is enabled
-        client = get_supabase_client()
-        if client is None:
-            logger.warning("Authentication is disabled - no Supabase client available")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Authentication service is not available",
-            )
-
-        # Decode the token
-        payload = jwt.decode(
-            token.credentials,
-            settings.JWT_SECRET_KEY,
-            algorithms=[settings.JWT_ALGORITHM],
+    client = get_supabase_client()
+    if client is None:
+        logger.warning("Authentication is disabled - no Supabase client available")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication service is not available",
         )
 
-        # Get user ID from token
-        user_id = payload.get("sub")
-        if not user_id:
+    try:
+        # Ask Supabase to validate the token and get the user
+        # The supabase-py library handles the JWT verification against Supabase's auth service
+        user_response = client.auth.get_user(token.credentials)
+        
+        # The user object is available in user_response.user
+        if not user_response or not user_response.user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication token",
             )
+        
+        # Pydantic models in Supabase are not directly dict-serializable
+        # We need to convert it to a dict to be used in the application
+        user_dict = user_response.user.dict()
+        return user_dict
 
-        # Get user data from Supabase
-        response = client.table("users").select("*").eq("id", user_id).execute()
-
-        # Check if user exists
-        if not response.data:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="User not found",
-            )
-
-        # Return user data
-        return response.data[0]
-    except jwt.PyJWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token",
-        )
     except Exception as e:
-        logger.error(f"Error getting current user: {str(e)}")
+        logger.error(f"Error getting current user from Supabase: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication error",
+            detail=f"Invalid authentication token: {e}",
         )
 
 
@@ -163,7 +143,7 @@ class SupabaseAuth:
         """Ensure the auth service is initialized."""
         if not self._initialized:
             try:
-                self.client = await get_supabase_client()
+                self.client = get_supabase_client()
                 self._initialized = True
                 logger.info("Supabase auth service initialized")
             except Exception as e:
@@ -199,32 +179,23 @@ class SupabaseAuth:
                 "password": user_data.password,
             })
 
-            # Check if registration was successful
-            if not response.get("user"):
+            # Check for errors in the response
+            if response.user is None or response.session is None:
+                error_message = "Registration failed"
+                if response.user is None and response.session is None:
+                    # Likely email already exists and is confirmed
+                     error_message = "User with this email already exists."
+
+                logger.warning(f"Supabase registration failed for {user_data.email}. Message: {error_message}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Registration failed",
+                    detail=error_message,
                 )
 
-            # Get user data
-            user = response.get("user")
-
-            # Generate JWT token
-            settings = get_settings()
-            access_token = jwt.encode(
-                {
-                    "sub": user.get("id"),
-                    "email": user.get("email"),
-                    "exp": time.time() + settings.JWT_EXPIRE_MINUTES * 60,
-                },
-                settings.JWT_SECRET_KEY,
-                algorithm=settings.JWT_ALGORITHM,
-            )
-
-            # Return authentication response
+            # Return the direct Supabase authentication response
             return AuthResponse(
-                access_token=access_token,
-                user=user,
+                access_token=response.session.access_token,
+                user=response.user.dict(),
             )
         except HTTPException:
             raise
@@ -251,38 +222,24 @@ class SupabaseAuth:
         try:
             await self.ensure_initialized()
 
-            # Login user with Supabase
-            response = self.client.auth.sign_in({
+            # Sign in user with Supabase
+            response = self.client.auth.sign_in_with_password({
                 "email": credentials.email,
                 "password": credentials.password,
             })
 
             # Check if login was successful
-            if not response.get("user"):
+            if not response.session or not response.user:
+                logger.warning(f"Supabase login failed for {credentials.email}")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid credentials",
                 )
 
-            # Get user data
-            user = response.get("user")
-
-            # Generate JWT token
-            settings = get_settings()
-            access_token = jwt.encode(
-                {
-                    "sub": user.get("id"),
-                    "email": user.get("email"),
-                    "exp": time.time() + settings.JWT_EXPIRE_MINUTES * 60,
-                },
-                settings.JWT_SECRET_KEY,
-                algorithm=settings.JWT_ALGORITHM,
-            )
-
-            # Return authentication response
+            # Return the direct Supabase authentication response
             return AuthResponse(
-                access_token=access_token,
-                user=user,
+                access_token=response.session.access_token,
+                user=response.user.dict(),
             )
         except HTTPException:
             raise
@@ -295,29 +252,28 @@ class SupabaseAuth:
 
     async def logout(self, token: str) -> Dict[str, str]:
         """
-        Logout a user.
+        Logout a user by invalidating the token with Supabase.
 
         Args:
-            token: JWT token
+            token: The user's JWT
 
         Returns:
-            Success message
+            A confirmation message
 
         Raises:
             HTTPException: If logout fails
         """
         try:
             await self.ensure_initialized()
-
-            # Logout user with Supabase
-            self.client.auth.sign_out()
-
-            # Return success message
+            
+            # Use the provided token to sign out
+            self.client.auth.sign_out(token)
+            
             return {"message": "Successfully logged out"}
         except Exception as e:
             logger.error(f"Error logging out user: {str(e)}")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Logout failed: {str(e)}",
             )
 
