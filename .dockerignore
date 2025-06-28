@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+
+# Docker
+.dockerignore
+Dockerfile
+
+# IDEs and editors
+.idea
+.vscode
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Notebooks
+.ipynb_checkpoints
+
+# Local data and logs
+*.log
+*.db
+*.sqlite3
+/data/
+/logs/
+htmlcov/
+*.csv
+*.mp3
+
+# Temporary files
+*.tmp
+
+# OS-specific
+.DS_Store
+Thumbs.db 
