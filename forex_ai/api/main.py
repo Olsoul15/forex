@@ -806,8 +806,8 @@ async def startup_event():
         logger.info("Starting Forex AI Trading System")
         
         # Initialize memory storage
-        # await memory_storage.start()
-        # logger.info("Memory storage initialized")
+        await memory_storage.start()
+        logger.info("Memory storage initialized")
         
         # Log configuration
         logger.info(f"Environment: {settings.ENVIRONMENT}")
