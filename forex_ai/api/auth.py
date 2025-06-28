@@ -8,6 +8,7 @@ import jwt
 from typing import Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 
 from forex_ai.auth.supabase import (
     auth_service,
@@ -23,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 
 @router.post("/register", response_model=AuthResponse)
@@ -55,64 +58,18 @@ async def login(credentials: UserCredentials) -> AuthResponse:
     return await auth_service.login(credentials)
 
 
-@router.post("/mock-login", response_model=AuthResponse)
-async def mock_login(credentials: UserCredentials) -> AuthResponse:
-    """
-    Mock login endpoint for testing purposes.
-    
-    This endpoint always succeeds and returns a hardcoded JWT token.
-
-    Args:
-        credentials: User credentials
-
-    Returns:
-        AuthResponse: Authentication response with mock access token
-    """
-    logger.info(f"Mock login for testing with email: {credentials.email}")
-    
-    # Create a mock JWT token that expires in 24 hours
-    settings = get_settings()
-    secret_key = settings.SECRET_KEY
-    expiration = int(time.time()) + 86400  # 24 hours
-    
-    payload = {
-        "sub": credentials.email,
-        "exp": expiration,
-        "iat": int(time.time()),
-        "role": "test_user"
-    }
-    
-    # Generate token
-    token = jwt.encode(payload, secret_key, algorithm=settings.ALGORITHM)
-    
-    # Create response
-    return AuthResponse(
-        access_token=token,
-        user={
-            "id": "test-user-id",
-            "email": credentials.email,
-            "role": "test_user",
-            "created_at": "2025-01-01T00:00:00Z"
-        }
-    )
-
-
 @router.post("/logout")
-async def logout(
-    current_user: Dict[str, Any] = Depends(get_current_user),
-) -> Dict[str, str]:
+async def logout(token: str = Depends(oauth2_scheme)) -> Dict[str, str]:
     """
-    Logout a user.
+    Logout a user by invalidating their JWT.
 
     Args:
-        current_user: Current user data from token
+        token: The bearer token from the Authorization header.
 
     Returns:
         Dict: Message confirming logout
     """
-    logger.info(f"Logout for user: {current_user.get('email')}")
-    # Get the token from the current user session
-    token = current_user.get("session", {}).get("access_token", "")
+    logger.info("Logout attempt.")
     return await auth_service.logout(token)
 
 
